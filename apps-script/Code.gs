@@ -20,7 +20,7 @@
  *   `errors`   — header: timestamp | error_code | request_body_json | stack_trace
  */
 
-const STATUS_URL_BASE = "https://mango-hsu.pages.dev/status";
+const STATUS_URL_BASE = "https://mango-hsu.rayclaw-worker.workers.dev/status";
 
 function doGet(e) {
   const action = e.parameter.action;
