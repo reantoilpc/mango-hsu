@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans TC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-mango-50: #fff9e6;
+  --color-mango-100: #fff1b8;
+  --color-mango-200: #ffe47a;
+  --color-mango-300: #ffd43b;
+  --color-mango-400: #ffb800;
+  --color-mango-500: #ff8800;
+  --color-mango-600: #e66a00;
+  --color-mango-700: #b34d00;
+  --color-mango-900: #4d2600;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+}

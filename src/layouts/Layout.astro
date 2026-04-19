@@ -1,0 +1,59 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = "自家栽種、自家加工的金煌與愛文芒果乾。產季限量供應。" } = Astro.props;
+---
+
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <link
+      rel="preconnect"
+      href="https://fonts.googleapis.com"
+    />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap"
+    />
+    <title>{title}</title>
+  </head>
+  <body class="bg-mango-50 text-mango-900 min-h-screen flex flex-col">
+    <header class="border-b border-mango-200 bg-white/60 backdrop-blur">
+      <div class="max-w-4xl mx-auto px-5 py-4 flex items-center justify-between">
+        <a href="/" class="flex items-center gap-2 font-bold text-lg">
+          <span class="text-2xl">🥭</span>
+          <span>芒果許</span>
+        </a>
+        <nav class="flex gap-5 text-sm">
+          <a href="/products" class="hover:text-mango-600">產品</a>
+          <a href="/order" class="hover:text-mango-600">下訂</a>
+          <a href="/status" class="hover:text-mango-600">查詢</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="flex-1">
+      <slot />
+    </main>
+
+    <footer class="border-t border-mango-200 bg-white/60 mt-12">
+      <div class="max-w-4xl mx-auto px-5 py-6 text-xs text-mango-700 space-y-1">
+        <p>芒果許 · 自產自消芒果 · 產季限量供應</p>
+        <p>聯絡：<a href="mailto:rhsu1037@gmail.com" class="underline">rhsu1037@gmail.com</a></p>
+      </div>
+    </footer>
+  </body>
+</html>

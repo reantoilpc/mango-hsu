@@ -1,0 +1,40 @@
+---
+import type { Product } from "../lib/types";
+
+interface Props {
+  product: Product;
+}
+
+const { product } = Astro.props;
+---
+
+<article
+  class:list={[
+    "border rounded-xl p-5 transition bg-white/70",
+    product.available
+      ? "border-mango-200 hover:border-mango-500"
+      : "border-mango-100 opacity-60",
+  ]}
+>
+  <div class="flex items-start justify-between gap-3 mb-2">
+    <h3 class="text-lg font-semibold">
+      {product.name}
+    </h3>
+    {
+      product.available ? (
+        <span class="text-xs font-medium bg-mango-500 text-white px-2 py-1 rounded-full">
+          接單中
+        </span>
+      ) : (
+        <span class="text-xs font-medium bg-mango-100 text-mango-700 px-2 py-1 rounded-full">
+          已售完
+        </span>
+      )
+    }
+  </div>
+  <p class="text-sm text-mango-700 mb-3">{product.variant}</p>
+  <p class="text-2xl font-bold">
+    ${product.price}
+    <span class="text-sm font-normal text-mango-700">/包</span>
+  </p>
+</article>

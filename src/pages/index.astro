@@ -1,0 +1,95 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getStatus } from "../lib/api";
+import { FALLBACK_SETTINGS } from "../lib/fallback-data";
+
+const settings = (await getStatus()) ?? FALLBACK_SETTINGS;
+const accepting = settings.accepting_dry;
+---
+
+<Layout title="芒果許 — 自產自消芒果">
+  <section class="max-w-4xl mx-auto px-5 pt-10 pb-14">
+    <div class="flex flex-col gap-3 items-start">
+      <span
+        class:list={[
+          "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full",
+          accepting
+            ? "bg-mango-500 text-white"
+            : "bg-mango-100 text-mango-700",
+        ]}
+      >
+        <span
+          class:list={[
+            "w-1.5 h-1.5 rounded-full",
+            accepting ? "bg-white" : "bg-mango-700",
+          ]}
+        ></span>
+        {accepting ? "本季接單中" : "目前暫停接單，下一季見"}
+      </span>
+
+      <h1 class="text-4xl md:text-5xl font-bold leading-tight mt-2">
+        自家芒果<br />
+        自家曬乾
+      </h1>
+
+      <p class="text-lg text-mango-700 max-w-xl">
+        金煌與愛文芒果乾，從自家果園採收、晾曬、包裝。
+        不加人工甜味，只用果肉本身的甜。
+      </p>
+
+      {
+        accepting && (
+          <div class="flex flex-wrap gap-3 pt-4">
+            <a
+              href="/order"
+              class="bg-mango-500 hover:bg-mango-600 text-white font-semibold px-6 py-3 rounded-lg transition"
+            >
+              我要訂購
+            </a>
+            <a
+              href="/products"
+              class="border border-mango-300 hover:border-mango-500 text-mango-700 font-semibold px-6 py-3 rounded-lg transition"
+            >
+              看產品介紹
+            </a>
+          </div>
+        )
+      }
+
+      {
+        !accepting && (
+          <p class="text-sm text-mango-700 pt-2">
+            想要知道下一季開賣消息，直接私訊我們的 LINE{" "}
+            <span class="font-mono">{settings.support_line_id}</span>
+          </p>
+        )
+      }
+    </div>
+  </section>
+
+  <section class="bg-white/50 border-y border-mango-200">
+    <div class="max-w-4xl mx-auto px-5 py-10 grid gap-6 md:grid-cols-3">
+      <div>
+        <p class="text-2xl font-bold">🌳</p>
+        <h3 class="font-semibold mt-1">自家果園</h3>
+        <p class="text-sm text-mango-700 mt-1">
+          從採收到加工都在家裡，沒有代工、沒有大盤商，每一批都看得到。
+        </p>
+      </div>
+      <div>
+        <p class="text-2xl font-bold">🍯</p>
+        <h3 class="font-semibold mt-1">自然的甜</h3>
+        <p class="text-sm text-mango-700 mt-1">
+          只用果肉本身的糖分，不額外加糖、不加防腐劑。果香濃、口感紮實。
+        </p>
+      </div>
+      <div>
+        <p class="text-2xl font-bold">📦</p>
+        <h3 class="font-semibold mt-1">產季限量</h3>
+        <p class="text-sm text-mango-700 mt-1">
+          每年產量有限，建議早鳥下單。售完我們會即時更新。
+        </p>
+      </div>
+    </div>
+  </section>
+</Layout>

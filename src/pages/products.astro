@@ -1,0 +1,101 @@
+---
+import Layout from "../layouts/Layout.astro";
+import ProductCard from "../components/ProductCard.astro";
+import { getStatus } from "../lib/api";
+import { FALLBACK_SETTINGS } from "../lib/fallback-data";
+
+const settings = (await getStatus()) ?? FALLBACK_SETTINGS;
+---
+
+<Layout title="產品 · 芒果許">
+  <section class="max-w-4xl mx-auto px-5 pt-10 pb-6">
+    <h1 class="text-3xl font-bold mb-2">產品</h1>
+    <p class="text-mango-700">
+      自家果園採收、曬製、包裝。不加糖、不加防腐劑，只用芒果本身的甜。
+    </p>
+  </section>
+
+  <section class="max-w-4xl mx-auto px-5 pb-12">
+    <div class="grid gap-4 md:grid-cols-2">
+      {settings.products.map((p) => <ProductCard product={p} />)}
+    </div>
+
+    {
+      settings.accepting_dry && (
+        <div class="mt-8">
+          <a
+            href="/order"
+            class="inline-block bg-mango-500 hover:bg-mango-600 text-white font-semibold px-6 py-3 rounded-lg transition"
+          >
+            我要訂購
+          </a>
+        </div>
+      )
+    }
+  </section>
+
+  <section class="max-w-4xl mx-auto px-5 pb-16">
+    <h2 class="text-2xl font-bold mb-6 border-t border-mango-200 pt-8">
+      常見問題
+    </h2>
+
+    <div class="space-y-6 text-sm">
+      <div>
+        <h3 class="font-semibold text-base mb-1">運費怎麼算？</h3>
+        <p class="text-mango-700">
+          滿 {settings.free_shipping_min_packages} 包免運，
+          不滿 {settings.free_shipping_min_packages} 包統一加
+          ${settings.shipping_fee_twd} 運費。
+        </p>
+      </div>
+
+      <div>
+        <h3 class="font-semibold text-base mb-1">多久可以收到？</h3>
+        <p class="text-mango-700">
+          收到款項後 {settings.eta_days_after_payment} 個工作天內出貨。
+          出貨後我們會在訂單狀態頁更新宅配單號，你也會收到 LINE 通知。
+        </p>
+      </div>
+
+      <div>
+        <h3 class="font-semibold text-base mb-1">怎麼付款？</h3>
+        <p class="text-mango-700">
+          送出訂單後，會拿到訂單編號和一組「預期備註」（例如
+          <span class="font-mono">M-20260519-001-王小明</span>）。
+          銀行轉帳時把這一整串貼到備註欄，我們就能自動對到是你的款。
+        </p>
+      </div>
+
+      <div>
+        <h3 class="font-semibold text-base mb-1">還可以訂購的量？</h3>
+        <p class="text-mango-700">
+          每年產量有限，**建議早鳥下單**。售完的品項會即時顯示「已售完」，
+          不會再接受下單。
+        </p>
+      </div>
+
+      <div>
+        <h3 class="font-semibold text-base mb-1">可以指定到貨日嗎？</h3>
+        <p class="text-mango-700">
+          目前不提供指定到貨日。收到款項後我們會儘快出貨。
+        </p>
+      </div>
+
+      <div>
+        <h3 class="font-semibold text-base mb-1">訂單送出後要改怎麼辦？</h3>
+        <p class="text-mango-700">
+          網站目前不提供線上修改。請直接 LINE 聯絡我們
+          <span class="font-mono">{settings.support_line_id}</span>
+          ，附上訂單編號。
+        </p>
+      </div>
+
+      <div>
+        <h3 class="font-semibold text-base mb-1">保存建議？</h3>
+        <p class="text-mango-700">
+          未開封常溫可保存 6 個月；開封後請放冷藏、2 週內食用完畢。
+        </p>
+      </div>
+    </div>
+  </section>
+</Layout>

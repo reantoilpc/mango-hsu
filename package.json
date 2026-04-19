@@ -1,0 +1,20 @@
+{
+  "name": "mango-hsu",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^6.1.8"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.8",
+    "@tailwindcss/vite": "^4.2.2",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^6.0.3"
+  }
+}

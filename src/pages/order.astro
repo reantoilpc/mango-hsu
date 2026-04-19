@@ -1,0 +1,391 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getStatus } from "../lib/api";
+import { FALLBACK_SETTINGS } from "../lib/fallback-data";
+
+const settings = (await getStatus()) ?? FALLBACK_SETTINGS;
+const available = settings.products.filter((p) => p.available);
+const freeShipMin = settings.free_shipping_min_packages;
+const shipFee = settings.shipping_fee_twd;
+---
+
+<Layout title="下訂 · 芒果許">
+  <section class="max-w-2xl mx-auto px-5 pt-10 pb-16">
+    {
+      !settings.accepting_dry ? (
+        <div class="text-center py-10">
+          <h1 class="text-2xl font-bold mb-2">目前暫停接單</h1>
+          <p class="text-mango-700">
+            產季結束了，謝謝大家。下一季開賣時我們會在首頁公告。
+          </p>
+        </div>
+      ) : available.length === 0 ? (
+        <div class="text-center py-10">
+          <h1 class="text-2xl font-bold mb-2">今年全部售完</h1>
+          <p class="text-mango-700">感謝支持！下一季見。</p>
+        </div>
+      ) : (
+        <>
+          <h1 class="text-3xl font-bold mb-1">下訂</h1>
+          <p class="text-mango-700 mb-8 text-sm">
+            滿 {freeShipMin} 包免運，不滿 {freeShipMin} 包加 ${shipFee} 運費。
+          </p>
+
+          <form
+            id="order-form"
+            class="space-y-5"
+            novalidate
+            data-free-ship-min={freeShipMin}
+            data-ship-fee={shipFee}
+          >
+            <div>
+              <label class="block mb-1 text-sm font-medium" for="name">
+                姓名 <span class="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                id="name"
+                name="name"
+                required
+                maxlength="50"
+                class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white focus:border-mango-500 focus:ring-1 focus:ring-mango-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label class="block mb-1 text-sm font-medium" for="phone">
+                手機（TW 格式，例 0912345678）{" "}
+                <span class="text-red-500">*</span>
+              </label>
+              <input
+                type="tel"
+                id="phone"
+                name="phone"
+                required
+                pattern="09[0-9]{8}"
+                inputmode="numeric"
+                maxlength="10"
+                class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white focus:border-mango-500 focus:ring-1 focus:ring-mango-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label class="block mb-1 text-sm font-medium" for="address">
+                收件地址 <span class="text-red-500">*</span>
+              </label>
+              <textarea
+                id="address"
+                name="address"
+                required
+                rows="2"
+                maxlength="200"
+                class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white focus:border-mango-500 focus:ring-1 focus:ring-mango-500 outline-none"
+              ></textarea>
+            </div>
+
+            <div>
+              <p class="block mb-2 text-sm font-medium">
+                訂購品項 <span class="text-red-500">*</span>
+              </p>
+              <div class="space-y-3">
+                {available.map((p) => (
+                  <div class="flex items-center gap-3 border border-mango-200 rounded-lg px-3 py-2 bg-white">
+                    <div class="flex-1">
+                      <p class="font-medium text-sm">
+                        {p.name} · {p.variant}
+                      </p>
+                      <p class="text-xs text-mango-700">${p.price} / 包</p>
+                    </div>
+                    <input
+                      type="number"
+                      name={`qty_${p.sku}`}
+                      data-sku={p.sku}
+                      data-price={p.price}
+                      min="0"
+                      max="99"
+                      value="0"
+                      class="item-qty w-20 border border-mango-300 rounded px-2 py-1 text-center focus:border-mango-500 outline-none"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div
+                class="mt-3 text-sm bg-mango-50 rounded-lg px-3 py-2 border border-mango-200"
+                id="summary"
+              >
+                <div class="flex justify-between">
+                  <span>小計</span><span id="subtotal">$0</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>運費</span><span id="shipping">$0</span>
+                </div>
+                <div class="flex justify-between font-semibold pt-1 border-t border-mango-200 mt-1">
+                  <span>總計</span><span id="total">$0</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label class="block mb-1 text-sm font-medium" for="notes">
+                備註（選填，例：需要附卡片）
+              </label>
+              <textarea
+                id="notes"
+                name="notes"
+                rows="2"
+                maxlength="200"
+                class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white focus:border-mango-500 focus:ring-1 focus:ring-mango-500 outline-none"
+              ></textarea>
+            </div>
+
+            {/* honeypot — 機器人會填，人類看不到 */}
+            <input
+              type="text"
+              name="website"
+              tabindex="-1"
+              autocomplete="off"
+              aria-hidden="true"
+              class="hidden"
+            />
+
+            <label class="flex items-start gap-2 text-xs text-mango-700">
+              <input
+                type="checkbox"
+                id="pdpa"
+                required
+                class="mt-0.5"
+              />
+              <span>
+                我同意：本網站蒐集姓名、電話、地址僅用於 mango-hsu 訂單聯絡、
+                寄送與對帳，保存至訂單完成後 6 個月後刪除。我有查詢、更正、
+                刪除之權利，可來信{" "}
+                <a class="underline" href="mailto:rhsu1037@gmail.com">
+                  rhsu1037@gmail.com
+                </a>
+                。
+              </span>
+            </label>
+
+            <div id="form-error" class="hidden text-sm text-red-600"></div>
+
+            <button
+              type="submit"
+              id="submit-btn"
+              class="w-full bg-mango-500 hover:bg-mango-600 disabled:bg-mango-300 disabled:cursor-not-allowed text-white font-semibold px-6 py-3 rounded-lg transition"
+            >
+              送出訂單
+            </button>
+          </form>
+
+          <div id="confirmation" class="hidden space-y-5">
+            <div class="bg-white rounded-xl border border-mango-300 p-6 space-y-3">
+              <p class="text-sm text-mango-700">訂單成立</p>
+              <h2 class="text-2xl font-bold font-mono" id="c-order-id"></h2>
+              <dl class="text-sm space-y-1">
+                <div class="flex justify-between">
+                  <dt>小計</dt><dd id="c-subtotal"></dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt>運費</dt><dd id="c-shipping"></dd>
+                </div>
+                <div class="flex justify-between font-semibold pt-1 border-t border-mango-200 mt-1">
+                  <dt>總計</dt><dd id="c-total"></dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="bg-mango-100 border border-mango-300 rounded-xl p-6 space-y-3">
+              <p class="text-sm font-semibold">👉 請用以下資訊轉帳：</p>
+              <div>
+                <p class="text-xs text-mango-700 mb-1">銀行帳號</p>
+                <p class="font-mono text-sm break-all" id="c-bank"></p>
+              </div>
+              <div>
+                <p class="text-xs text-mango-700 mb-1">
+                  轉帳金額
+                </p>
+                <p class="font-mono text-sm" id="c-amount"></p>
+              </div>
+              <div>
+                <p class="text-xs text-mango-700 mb-1">
+                  <strong>備註欄請填以下這一整串：</strong>
+                </p>
+                <div class="flex gap-2 items-stretch">
+                  <p
+                    class="font-mono text-sm bg-white border border-mango-200 rounded px-3 py-2 flex-1 break-all"
+                    id="c-memo"
+                  ></p>
+                  <button
+                    type="button"
+                    id="copy-memo-btn"
+                    class="bg-mango-500 hover:bg-mango-600 text-white text-sm px-3 py-2 rounded whitespace-nowrap"
+                  >
+                    複製
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-xl border border-mango-200 p-6 text-sm space-y-2">
+              <p>
+                📦 收到款項後 <span id="c-eta"></span> 個工作天內出貨。
+              </p>
+              <p>
+                🔗 之後可以從
+                <a
+                  id="c-status-link"
+                  class="text-mango-600 underline"
+                  target="_blank"
+                  rel="noopener"
+                  >訂單狀態頁</a
+                >
+                查是否收到款、是否已出貨、宅配單號。
+              </p>
+              <p class="text-xs text-mango-700 pt-1">
+                建議截圖保存這頁，以便後續追蹤。
+              </p>
+            </div>
+          </div>
+        </>
+      )
+    }
+  </section>
+</Layout>
+
+<script>
+  import { submitOrder, newIdempotencyKey } from "../lib/api";
+  import type { OrderItem } from "../lib/types";
+
+  const form = document.getElementById("order-form") as HTMLFormElement | null;
+  if (form) {
+    const freeShipMin = Number(form.dataset.freeShipMin ?? 10);
+    const shipFee = Number(form.dataset.shipFee ?? 80);
+
+    const qtyInputs = form.querySelectorAll<HTMLInputElement>(".item-qty");
+    const subtotalEl = document.getElementById("subtotal") as HTMLElement;
+    const shippingEl = document.getElementById("shipping") as HTMLElement;
+    const totalEl = document.getElementById("total") as HTMLElement;
+    const errEl = document.getElementById("form-error") as HTMLElement;
+    const submitBtn = document.getElementById("submit-btn") as HTMLButtonElement;
+    const pdpa = document.getElementById("pdpa") as HTMLInputElement;
+
+    function computeItems(): { items: OrderItem[]; totalQty: number; subtotal: number } {
+      const items: OrderItem[] = [];
+      let totalQty = 0;
+      let subtotal = 0;
+      qtyInputs.forEach((el) => {
+        const qty = Math.max(0, Math.floor(Number(el.value) || 0));
+        if (qty > 0) {
+          const sku = el.dataset.sku as OrderItem["sku"];
+          const price = Number(el.dataset.price ?? 0);
+          items.push({ sku, qty });
+          totalQty += qty;
+          subtotal += price * qty;
+        }
+      });
+      return { items, totalQty, subtotal };
+    }
+
+    function recomputeSummary() {
+      const { totalQty, subtotal } = computeItems();
+      const shipping = totalQty >= freeShipMin ? 0 : totalQty > 0 ? shipFee : 0;
+      const total = subtotal + shipping;
+      subtotalEl.textContent = `$${subtotal}`;
+      shippingEl.textContent = totalQty >= freeShipMin && totalQty > 0 ? `免運` : `$${shipping}`;
+      totalEl.textContent = `$${total}`;
+    }
+
+    qtyInputs.forEach((el) => el.addEventListener("input", recomputeSummary));
+    recomputeSummary();
+
+    function showError(msg: string) {
+      errEl.textContent = msg;
+      errEl.classList.remove("hidden");
+    }
+
+    function clearError() {
+      errEl.textContent = "";
+      errEl.classList.add("hidden");
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearError();
+
+      if (!form.reportValidity()) return;
+
+      const { items, totalQty } = computeItems();
+      if (totalQty === 0) {
+        showError("請至少選購一項。");
+        return;
+      }
+
+      if (!pdpa.checked) {
+        showError("請勾選個資告知同意。");
+        return;
+      }
+
+      const name = (form.elements.namedItem("name") as HTMLInputElement).value.trim();
+      const phone = (form.elements.namedItem("phone") as HTMLInputElement).value.trim();
+      const address = (form.elements.namedItem("address") as HTMLTextAreaElement).value.trim();
+      const notes = (form.elements.namedItem("notes") as HTMLTextAreaElement).value.trim();
+      const honeypot = (form.elements.namedItem("website") as HTMLInputElement).value;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "處理中（最多 15 秒）...";
+
+      const res = await submitOrder({
+        idempotency_key: newIdempotencyKey(),
+        honeypot,
+        name,
+        phone,
+        address,
+        items,
+        notes,
+        pdpa_accepted: true,
+      });
+
+      if (!res.ok) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "送出訂單";
+        const msg = res.error_code === "SOLD_OUT"
+          ? `品項 ${res.sold_out_sku ?? ""} 剛剛售完，請調整後重新送出。`
+          : res.error_code === "SEASON_CLOSED"
+          ? "本季已暫停接單，下一季見。"
+          : res.error_code === "INVALID_TOKEN"
+          ? "驗證失敗，請重新整理頁面再試。"
+          : res.error_code === "LOCKED"
+          ? "系統正忙，請稍候再試。"
+          : res.message ?? "發生錯誤，請稍後再試或 LINE 聯絡我們。";
+        showError(msg);
+        return;
+      }
+
+      form.classList.add("hidden");
+      const confirmation = document.getElementById("confirmation") as HTMLElement;
+      confirmation.classList.remove("hidden");
+      (document.getElementById("c-order-id") as HTMLElement).textContent = res.order_id;
+      (document.getElementById("c-subtotal") as HTMLElement).textContent = `$${res.subtotal}`;
+      (document.getElementById("c-shipping") as HTMLElement).textContent = res.shipping === 0 ? "免運" : `$${res.shipping}`;
+      (document.getElementById("c-total") as HTMLElement).textContent = `$${res.total}`;
+      (document.getElementById("c-bank") as HTMLElement).textContent = res.bank_account_display;
+      (document.getElementById("c-amount") as HTMLElement).textContent = `$${res.total}`;
+      (document.getElementById("c-memo") as HTMLElement).textContent = res.expected_memo;
+      (document.getElementById("c-eta") as HTMLElement).textContent = String(res.eta_days_after_payment);
+      (document.getElementById("c-status-link") as HTMLAnchorElement).href = res.status_url;
+
+      const copyBtn = document.getElementById("copy-memo-btn") as HTMLButtonElement;
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(res.expected_memo);
+          copyBtn.textContent = "已複製";
+          setTimeout(() => (copyBtn.textContent = "複製"), 2000);
+        } catch {
+          copyBtn.textContent = "請手動複製";
+        }
+      });
+
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
+</script>

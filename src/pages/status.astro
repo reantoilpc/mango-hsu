@@ -1,0 +1,125 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="訂單狀態 · 芒果許">
+  <section class="max-w-2xl mx-auto px-5 pt-10 pb-16">
+    <h1 class="text-3xl font-bold mb-4">訂單狀態</h1>
+    <p class="text-sm text-mango-700 mb-6">
+      在網址後面加上你的訂單編號，例如{" "}
+      <span class="font-mono">/status?id=M-20260519-001</span>
+      就能看到狀態。
+    </p>
+
+    <form id="lookup-form" class="flex gap-2 mb-8">
+      <input
+        type="text"
+        id="order-id-input"
+        placeholder="M-YYYYMMDD-NNN"
+        pattern="M-[0-9]{8}-[0-9]{3}"
+        class="flex-1 border border-mango-300 rounded-lg px-3 py-2 bg-white font-mono focus:border-mango-500 outline-none"
+      />
+      <button
+        type="submit"
+        class="bg-mango-500 hover:bg-mango-600 text-white font-semibold px-5 py-2 rounded-lg"
+      >
+        查詢
+      </button>
+    </form>
+
+    <div id="result" class="hidden"></div>
+  </section>
+</Layout>
+
+<script>
+  import { getOrderStatus } from "../lib/api";
+
+  const form = document.getElementById("lookup-form") as HTMLFormElement;
+  const input = document.getElementById("order-id-input") as HTMLInputElement;
+  const result = document.getElementById("result") as HTMLElement;
+
+  function escape(s: string): string {
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function render(content: string) {
+    result.innerHTML = content;
+    result.classList.remove("hidden");
+  }
+
+  function badge(ok: boolean, okText: string, pendingText: string): string {
+    return ok
+      ? `<span class="inline-block text-xs font-medium bg-mango-500 text-white px-2 py-1 rounded-full">${okText}</span>`
+      : `<span class="inline-block text-xs font-medium bg-mango-100 text-mango-700 px-2 py-1 rounded-full">${pendingText}</span>`;
+  }
+
+  async function lookup(id: string) {
+    render(`<p class="text-mango-700 text-sm">查詢中...</p>`);
+    const res = await getOrderStatus(id);
+    if (!res.ok) {
+      const msg =
+        res.error_code === "NOT_FOUND"
+          ? "找不到這個訂單編號，確認一下有沒有打錯？"
+          : "查詢失敗，請稍後再試。";
+      render(`<p class="text-red-600 text-sm">${escape(msg)}</p>`);
+      return;
+    }
+    const created = new Date(res.created_at);
+    const createdStr = created.toLocaleString("zh-Hant-TW", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    render(`
+      <div class="bg-white rounded-xl border border-mango-200 p-6 space-y-4">
+        <div>
+          <p class="text-xs text-mango-700">訂單編號</p>
+          <p class="font-mono text-lg font-bold">${escape(res.order_id)}</p>
+          <p class="text-xs text-mango-700 mt-1">建立時間：${escape(createdStr)}</p>
+        </div>
+        <div class="border-t border-mango-200 pt-4 grid gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-sm">款項狀態</span>
+            ${badge(res.paid, "已收到款項", "等待收款中")}
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm">出貨狀態</span>
+            ${badge(res.shipped, "已出貨", "等待出貨中")}
+          </div>
+          ${
+            res.tracking_no
+              ? `<div class="flex items-center justify-between">
+                  <span class="text-sm">宅配單號</span>
+                  <span class="font-mono text-sm">${escape(res.tracking_no)}</span>
+                </div>`
+              : ""
+          }
+        </div>
+        <p class="text-xs text-mango-700 pt-2 border-t border-mango-200">
+          有問題請 LINE 我們，附上訂單編號即可。
+        </p>
+      </div>
+    `);
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const id = input.value.trim().toUpperCase();
+    if (!id) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("id", id);
+    window.history.replaceState(null, "", url);
+    void lookup(id);
+  });
+
+  const params = new URLSearchParams(window.location.search);
+  const idFromUrl = params.get("id");
+  if (idFromUrl) {
+    input.value = idFromUrl;
+    void lookup(idFromUrl);
+  }
+</script>
