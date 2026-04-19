@@ -1,0 +1,2 @@
+# Files/patterns here are excluded from Cloudflare static assets upload.
+# Leave blank to upload everything in dist/.
