@@ -1,0 +1,288 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { makeDb } from "../../../db/client";
+import { orders, order_items, products, audit_log } from "../../../db/schema";
+import { eq, desc } from "drizzle-orm";
+import { itemsToReadable, formatTaipei } from "../../../lib/formatters";
+
+const env = Astro.locals.runtime?.env;
+if (!env) return Astro.redirect("/admin/login?error=no_runtime");
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+
+const id = Astro.params.id;
+if (!id || !/^M-\d{8}-\d{3}$/.test(id)) {
+  return new Response("Invalid order id", { status: 400 });
+}
+
+const db = makeDb(env);
+const orderRows = await db.select().from(orders).where(eq(orders.order_id, id)).limit(1);
+if (orderRows.length === 0) {
+  return new Response("Order not found", { status: 404 });
+}
+const order = orderRows[0]!;
+
+const itemRows = await db
+  .select()
+  .from(order_items)
+  .where(eq(order_items.order_id, id));
+const productRows = await db.select().from(products);
+const productMap = new Map(productRows.map((p) => [p.sku, p]));
+const items = itemRows.map((i) => ({ ...i, product: productMap.get(i.sku) }));
+
+const auditRows = await db
+  .select()
+  .from(audit_log)
+  .where(eq(audit_log.order_id, id))
+  .orderBy(desc(audit_log.ts))
+  .limit(50);
+
+const isAdmin = session.role === "admin";
+---
+
+<Layout>
+  <main class="mx-auto max-w-3xl px-4 py-6">
+    <header class="mb-6 flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <a href="/admin/orders" class="text-sm text-gray-600 underline">← 訂單列表</a>
+        <h1 class="mt-1 text-2xl font-bold">{order.order_id}</h1>
+      </div>
+      <div class="flex gap-1">
+        <span
+          class:list={[
+            "rounded px-2 py-0.5 text-xs",
+            order.paid
+              ? "bg-emerald-100 text-emerald-700"
+              : "bg-amber-100 text-amber-700",
+          ]}
+        >
+          {order.paid ? "已付款" : "待付款"}
+        </span>
+        <span
+          class:list={[
+            "rounded px-2 py-0.5 text-xs",
+            order.shipped
+              ? "bg-blue-100 text-blue-700"
+              : "bg-gray-100 text-gray-700",
+          ]}
+        >
+          {order.shipped ? "已出貨" : "待出貨"}
+        </span>
+      </div>
+    </header>
+
+    <section class="mb-6 rounded border border-gray-200 p-4">
+      <h2 class="mb-3 text-lg font-bold">客人資訊</h2>
+      <dl class="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
+        <dt class="text-gray-500">姓名</dt>
+        <dd>{order.name}</dd>
+        <dt class="text-gray-500">電話</dt>
+        <dd>{order.phone}</dd>
+        <dt class="text-gray-500">地址</dt>
+        <dd>{order.address}</dd>
+        <dt class="text-gray-500">客戶備註</dt>
+        <dd>{order.notes || "（無）"}</dd>
+        <dt class="text-gray-500">下單時間</dt>
+        <dd>{formatTaipei(order.created_at)}</dd>
+      </dl>
+    </section>
+
+    <section class="mb-6 rounded border border-gray-200 p-4">
+      <h2 class="mb-3 text-lg font-bold">品項 ({itemsToReadable(items)})</h2>
+      <table class="w-full text-sm">
+        <thead class="text-left text-gray-500">
+          <tr>
+            <th class="pb-2">品項</th>
+            <th class="pb-2 text-right">單價</th>
+            <th class="pb-2 text-right">數量</th>
+            <th class="pb-2 text-right">小計</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {items.map((i) => (
+            <tr>
+              <td class="py-2">
+                {i.product ? `${i.product.name}${i.product.variant}` : i.sku}
+              </td>
+              <td class="py-2 text-right">${i.unit_price}</td>
+              <td class="py-2 text-right">{i.qty}</td>
+              <td class="py-2 text-right">${i.unit_price * i.qty}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot class="border-t border-gray-300 font-medium">
+          <tr>
+            <td colspan="3" class="pt-2 text-right">小計</td>
+            <td class="pt-2 text-right">${order.subtotal}</td>
+          </tr>
+          <tr>
+            <td colspan="3" class="text-right">運費</td>
+            <td class="text-right">${order.shipping}</td>
+          </tr>
+          <tr>
+            <td colspan="3" class="text-right">總計</td>
+            <td class="text-right">${order.total}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <p class="mt-3 text-sm text-gray-500">
+        轉帳備註：<code class="font-mono">{order.expected_memo}</code>
+      </p>
+    </section>
+
+    <section class="mb-6 rounded border border-gray-200 p-4">
+      <h2 class="mb-3 text-lg font-bold">操作</h2>
+      <div class="space-y-3">
+        {!order.paid && (
+          <button
+            id="mark-paid"
+            class="w-full rounded bg-emerald-600 px-4 py-3 text-base font-medium text-white hover:bg-emerald-700"
+          >
+            標為已付款
+          </button>
+        )}
+        {order.paid && !order.shipped && (
+          <form id="ship-form" class="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              id="tracking-input"
+              placeholder="物流單號（選填）"
+              value={order.tracking_no ?? ""}
+              class="flex-1 rounded border border-gray-300 px-3 py-3 text-base"
+            />
+            <button
+              type="button"
+              id="mark-shipped"
+              class="rounded bg-blue-600 px-4 py-3 text-base font-medium text-white hover:bg-blue-700"
+            >
+              標為已出貨
+            </button>
+          </form>
+        )}
+        {order.shipped && (
+          <div class="text-sm">
+            出貨時間 {order.shipped_at ? formatTaipei(order.shipped_at) : "—"}
+            {order.tracking_no && ` ／ 物流 ${order.tracking_no}`}
+          </div>
+        )}
+        {isAdmin && (
+          <details class="rounded border border-amber-200 bg-amber-50 p-3 text-sm">
+            <summary class="cursor-pointer font-medium text-amber-800">
+              admin: 編輯 / 取消
+            </summary>
+            <form id="edit-form" class="mt-3 space-y-2">
+              <label class="block">
+                <span class="text-xs text-gray-600">地址</span>
+                <input
+                  name="address"
+                  value={order.address}
+                  class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label class="block">
+                <span class="text-xs text-gray-600">客戶備註</span>
+                <input
+                  name="notes"
+                  value={order.notes ?? ""}
+                  class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <div class="flex justify-end gap-2">
+                <button
+                  type="button"
+                  id="save-edit"
+                  class="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700"
+                >
+                  儲存
+                </button>
+                <button
+                  type="button"
+                  id="cancel-order"
+                  class="rounded border border-red-400 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+                >
+                  取消訂單
+                </button>
+              </div>
+            </form>
+          </details>
+        )}
+      </div>
+    </section>
+
+    <section class="rounded border border-gray-200 p-4">
+      <h2 class="mb-3 text-lg font-bold">變更歷史</h2>
+      <ul class="space-y-2 text-xs text-gray-700">
+        {auditRows.map((a) => (
+          <li class="border-l-2 border-gray-200 pl-3">
+            <div class="font-mono text-gray-500">{formatTaipei(a.ts)}</div>
+            <div>
+              <span class="font-medium">{a.user_email}</span> ／ {a.action}
+              {a.details && (
+                <span class="text-gray-500"> ({a.details})</span>
+              )}
+            </div>
+          </li>
+        ))}
+        {auditRows.length === 0 && (
+          <li class="text-sm text-gray-500">（尚無紀錄）</li>
+        )}
+      </ul>
+    </section>
+  </main>
+
+  <script define:vars={{ orderId: order.order_id }}>
+    async function callApi(path, body) {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+      if (!res.ok) {
+        alert("失敗：" + (await res.text()));
+        return false;
+      }
+      return true;
+    }
+
+    document
+      .getElementById("mark-paid")
+      ?.addEventListener("click", async () => {
+        if (!confirm("確定標為已付款？")) return;
+        if (await callApi(`/api/admin/orders/${orderId}/mark-paid`)) location.reload();
+      });
+
+    document
+      .getElementById("mark-shipped")
+      ?.addEventListener("click", async () => {
+        const trackingNo = document.getElementById("tracking-input").value.trim();
+        if (!confirm("確定標為已出貨？")) return;
+        if (
+          await callApi(`/api/admin/orders/${orderId}/mark-shipped`, {
+            tracking_no: trackingNo,
+          })
+        )
+          location.reload();
+      });
+
+    document
+      .getElementById("save-edit")
+      ?.addEventListener("click", async () => {
+        const form = document.getElementById("edit-form");
+        const data = {
+          address: form.elements["address"].value,
+          notes: form.elements["notes"].value,
+        };
+        if (await callApi(`/api/admin/orders/${orderId}/edit`, data)) location.reload();
+      });
+
+    document
+      .getElementById("cancel-order")
+      ?.addEventListener("click", async () => {
+        if (!confirm("取消訂單後不可復原。確定要取消？")) return;
+        if (await callApi(`/api/admin/orders/${orderId}/cancel`)) {
+          location.href = "/admin/orders";
+        }
+      });
+  </script>
+</Layout>

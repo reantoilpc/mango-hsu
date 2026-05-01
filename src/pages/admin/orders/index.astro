@@ -1,0 +1,242 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { makeDb } from "../../../db/client";
+import { orders, order_items, products } from "../../../db/schema";
+import { eq, and, desc, gte, lte, inArray } from "drizzle-orm";
+import { itemsToReadable, formatTaipei } from "../../../lib/formatters";
+
+const env = Astro.locals.runtime?.env;
+if (!env) return Astro.redirect("/admin/login?error=no_runtime");
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+
+const url = new URL(Astro.request.url);
+const filter = url.searchParams.get("filter") ?? "all"; // all | unpaid | paid_unship | shipped
+const fromDate = url.searchParams.get("from") ?? "";
+const toDate = url.searchParams.get("to") ?? "";
+
+const db = makeDb(env);
+
+// Build where clauses
+const conditions = [] as ReturnType<typeof eq>[];
+if (filter === "unpaid") conditions.push(eq(orders.paid, false));
+else if (filter === "paid_unship")
+  conditions.push(and(eq(orders.paid, true), eq(orders.shipped, false))!);
+else if (filter === "shipped") conditions.push(eq(orders.shipped, true));
+if (fromDate) conditions.push(gte(orders.created_at, fromDate));
+if (toDate) conditions.push(lte(orders.created_at, toDate + "T23:59:59Z"));
+
+const orderRows = await db
+  .select()
+  .from(orders)
+  .where(conditions.length > 0 ? and(...conditions) : undefined)
+  .orderBy(desc(orders.created_at))
+  .limit(200);
+
+// Hydrate items
+const orderIds = orderRows.map((o) => o.order_id);
+const itemRows = orderIds.length
+  ? await db
+      .select()
+      .from(order_items)
+      .where(inArray(order_items.order_id, orderIds))
+  : [];
+const productRows = await db.select().from(products);
+const productMap = new Map(productRows.map((p) => [p.sku, p]));
+
+const itemsByOrder = new Map<string, typeof itemRows>();
+for (const i of itemRows) {
+  const arr = itemsByOrder.get(i.order_id) ?? [];
+  arr.push(i);
+  itemsByOrder.set(i.order_id, arr);
+}
+
+const decorated = orderRows.map((o) => {
+  const items = (itemsByOrder.get(o.order_id) ?? []).map((i) => ({
+    ...i,
+    product: productMap.get(i.sku),
+  }));
+  return { order: o, items, summary: itemsToReadable(items) };
+});
+
+const filterLabels: Record<string, string> = {
+  all: "全部",
+  unpaid: "待付款",
+  paid_unship: "已付款待出貨",
+  shipped: "已出貨",
+};
+---
+
+<Layout>
+  <main class="mx-auto max-w-5xl px-4 py-6">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">訂單列表</h1>
+      <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
+    </header>
+
+    <nav class="mb-4 flex flex-wrap gap-2">
+      {Object.entries(filterLabels).map(([k, v]) => (
+        <a
+          href={`?filter=${k}`}
+          class:list={[
+            "rounded px-3 py-1.5 text-sm",
+            filter === k
+              ? "bg-orange-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+          ]}
+        >
+          {v}
+        </a>
+      ))}
+    </nav>
+
+    <form
+      id="batch-form"
+      action="#"
+      method="POST"
+      class="rounded border border-gray-200"
+    >
+      <div class="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3">
+        <label class="text-sm">
+          <input type="checkbox" id="select-all" class="mr-1" />
+          全選
+        </label>
+        <span class="ml-auto text-sm text-gray-600">
+          選 <span id="selected-count">0</span> 筆
+        </span>
+        <button
+          type="button"
+          id="goto-pick"
+          disabled
+          class="rounded bg-orange-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+        >
+          一鍵生揀貨單
+        </button>
+        <button
+          type="button"
+          id="bulk-mark-shipped"
+          disabled
+          class="rounded border border-gray-300 px-4 py-2 text-sm disabled:opacity-40"
+        >
+          批次標已出貨
+        </button>
+      </div>
+
+      <ul class="divide-y divide-gray-200">
+        {decorated.map(({ order, summary }) => (
+          <li class="flex flex-wrap items-center gap-3 px-4 py-3">
+            <input
+              type="checkbox"
+              class="row-checkbox h-5 w-5"
+              name="ids"
+              value={order.order_id}
+              data-shipped={order.shipped ? "1" : "0"}
+              data-paid={order.paid ? "1" : "0"}
+            />
+            <div class="min-w-0 flex-1">
+              <a
+                href={`/admin/orders/${order.order_id}`}
+                class="font-medium underline"
+              >
+                {order.order_id}
+              </a>
+              <span class="ml-2 text-gray-700">{order.name}</span>
+              <div class="text-sm text-gray-600 truncate">
+                {summary} ／ ${order.total}
+              </div>
+            </div>
+            <div class="flex flex-shrink-0 gap-1">
+              <span
+                class:list={[
+                  "rounded px-2 py-0.5 text-xs",
+                  order.paid
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-amber-100 text-amber-700",
+                ]}
+              >
+                {order.paid ? "已付款" : "待付款"}
+              </span>
+              <span
+                class:list={[
+                  "rounded px-2 py-0.5 text-xs",
+                  order.shipped
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-gray-100 text-gray-700",
+                ]}
+              >
+                {order.shipped ? "已出貨" : "待出貨"}
+              </span>
+            </div>
+            <div class="hidden text-xs text-gray-500 sm:block">
+              {formatTaipei(order.created_at)}
+            </div>
+          </li>
+        ))}
+        {decorated.length === 0 && (
+          <li class="px-4 py-8 text-center text-sm text-gray-500">
+            （無符合條件的訂單）
+          </li>
+        )}
+      </ul>
+    </form>
+  </main>
+
+  <script>
+    const form = document.getElementById("batch-form") as HTMLFormElement;
+    const selectAll = document.getElementById("select-all") as HTMLInputElement;
+    const rowCheckboxes = () =>
+      Array.from(form.querySelectorAll<HTMLInputElement>(".row-checkbox"));
+    const selectedCountEl = document.getElementById("selected-count")!;
+    const gotoPickBtn = document.getElementById("goto-pick") as HTMLButtonElement;
+    const bulkShipBtn = document.getElementById(
+      "bulk-mark-shipped",
+    ) as HTMLButtonElement;
+
+    function checked() {
+      return rowCheckboxes().filter((c) => c.checked);
+    }
+
+    function refresh() {
+      const sel = checked();
+      selectedCountEl.textContent = String(sel.length);
+      gotoPickBtn.disabled = sel.length === 0;
+      // Bulk-mark-shipped only on paid + un-shipped rows
+      bulkShipBtn.disabled =
+        sel.length === 0 ||
+        sel.some(
+          (c) => c.dataset.paid !== "1" || c.dataset.shipped === "1",
+        );
+    }
+
+    selectAll.addEventListener("change", () => {
+      rowCheckboxes().forEach((c) => (c.checked = selectAll.checked));
+      refresh();
+    });
+
+    form.addEventListener("change", (e) => {
+      if ((e.target as HTMLElement).classList.contains("row-checkbox")) refresh();
+    });
+
+    gotoPickBtn.addEventListener("click", () => {
+      const ids = checked()
+        .map((c) => c.value)
+        .join(",");
+      if (!ids) return;
+      window.location.href = `/admin/batches/new?ids=${encodeURIComponent(ids)}`;
+    });
+
+    bulkShipBtn.addEventListener("click", async () => {
+      const ids = checked().map((c) => c.value);
+      if (!ids.length) return;
+      if (!confirm(`確定把 ${ids.length} 筆訂單標為已出貨？`)) return;
+      const res = await fetch("/api/admin/orders/bulk-mark-shipped", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (res.ok) location.reload();
+      else alert("失敗：" + (await res.text()));
+    });
+  </script>
+</Layout>

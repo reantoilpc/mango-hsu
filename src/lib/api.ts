@@ -5,7 +5,10 @@ import type {
   SiteSettings,
 } from "./types";
 
-const APPS_SCRIPT_URL = import.meta.env.PUBLIC_APPS_SCRIPT_URL ?? "";
+// V2: customer site posts to same-origin /api/* endpoints (no more Apps Script).
+// PUBLIC_APPS_SCRIPT_URL kept readable from import.meta.env only as a temporary
+// fallback during the cutover window — drop after Phase 5.
+const FALLBACK_APPS_SCRIPT_URL = import.meta.env.PUBLIC_APPS_SCRIPT_URL ?? "";
 const ORDER_TOKEN = import.meta.env.PUBLIC_ORDER_TOKEN ?? "";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -28,10 +31,9 @@ export function newIdempotencyKey(): string {
 }
 
 export async function getStatus(): Promise<SiteSettings | null> {
-  if (!APPS_SCRIPT_URL) return null;
   const ctrl = withTimeout(FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${APPS_SCRIPT_URL}?action=status`, {
+    const res = await fetch("/api/site/status", {
       method: "GET",
       signal: ctrl.signal,
     });
@@ -52,9 +54,9 @@ export async function submitOrder(
   const ctrl = withTimeout(FETCH_TIMEOUT_MS);
   const payload: OrderRequest = { ...body, token: ORDER_TOKEN };
   try {
-    const res = await fetch(APPS_SCRIPT_URL, {
+    const res = await fetch("/api/orders", {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
@@ -76,12 +78,16 @@ export async function getOrderStatus(
 ): Promise<OrderStatusResponse> {
   const ctrl = withTimeout(FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(
-      `${APPS_SCRIPT_URL}?action=order&id=${encodeURIComponent(orderId)}`,
-      { method: "GET", signal: ctrl.signal },
-    );
+    const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/public`, {
+      method: "GET",
+      signal: ctrl.signal,
+    });
     return (await res.json()) as OrderStatusResponse;
   } catch {
     return { ok: false, error_code: "INTERNAL" };
   }
 }
+
+// Kept exported (unused) so code searching for the old URL constant still finds
+// the new file. Remove after Phase 5 cutover.
+export const _LEGACY_APPS_SCRIPT_URL = FALLBACK_APPS_SCRIPT_URL;

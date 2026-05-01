@@ -1,0 +1,164 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { makeDb } from "../../../db/client";
+import { orders, order_items, products } from "../../../db/schema";
+import { inArray } from "drizzle-orm";
+import { aggregateSkuTotals, formatTaipei } from "../../../lib/formatters";
+
+const env = Astro.locals.runtime?.env;
+if (!env) return Astro.redirect("/admin/login?error=no_runtime");
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+
+const url = new URL(Astro.request.url);
+const idsParam = url.searchParams.get("ids") ?? "";
+const ids = idsParam
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s) => /^M-\d{8}-\d{3}$/.test(s));
+
+if (ids.length === 0) {
+  return new Response("No order ids in ?ids", { status: 400 });
+}
+
+const db = makeDb(env);
+
+const orderRows = await db
+  .select()
+  .from(orders)
+  .where(inArray(orders.order_id, ids));
+
+const itemRows = await db
+  .select()
+  .from(order_items)
+  .where(inArray(order_items.order_id, ids));
+
+const productRows = await db.select().from(products);
+const productMap = new Map(productRows.map((p) => [p.sku, p]));
+
+const itemsByOrder = new Map<
+  string,
+  Array<(typeof itemRows)[number] & { product?: (typeof productRows)[number] }>
+>();
+for (const i of itemRows) {
+  const arr = itemsByOrder.get(i.order_id) ?? [];
+  arr.push({ ...i, product: productMap.get(i.sku) });
+  itemsByOrder.set(i.order_id, arr);
+}
+
+const decorated = orderRows.map((o) => ({
+  order: o,
+  items: itemsByOrder.get(o.order_id) ?? [],
+}));
+decorated.sort((a, b) => a.order.created_at.localeCompare(b.order.created_at));
+
+const sku_totals = aggregateSkuTotals(decorated);
+const total_packages = sku_totals.reduce((s, x) => s + x.totalQty, 0);
+const today = formatTaipei(new Date().toISOString()).split(" ")[0];
+---
+
+<Layout>
+  <main class="mx-auto max-w-3xl px-4 py-6 print:max-w-none print:p-0">
+    <header class="mb-4 print:mb-2">
+      <div class="flex items-center justify-between print:hidden">
+        <a href="/admin/orders" class="text-sm text-gray-600 underline">
+          ← 訂單列表
+        </a>
+        <button
+          onclick="window.print()"
+          class="rounded bg-orange-600 px-4 py-2 text-white hover:bg-orange-700"
+        >
+          列印 (A4)
+        </button>
+      </div>
+      <h1 class="mt-2 text-2xl font-bold print:text-xl">
+        揀貨單 {today}
+      </h1>
+      <p class="text-sm text-gray-600 print:text-xs">
+        共 {decorated.length} 筆訂單 ／ {total_packages} 包
+      </p>
+    </header>
+
+    <section class="mb-6 rounded border-2 border-orange-300 bg-orange-50 p-4 print:border-black print:bg-transparent">
+      <h2 class="mb-3 text-lg font-bold print:text-base">今天總共要拿</h2>
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+        {sku_totals.map((t) => (
+          <li class="flex items-center justify-between rounded bg-white px-3 py-2 text-base shadow-sm print:bg-transparent print:shadow-none print:border-b print:border-gray-300">
+            <span>{t.label}</span>
+            <span class="font-bold text-xl print:text-base">{t.totalQty} 包</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+
+    <section>
+      <h2 class="mb-3 text-lg font-bold print:text-base">逐單揀貨</h2>
+      <ul class="space-y-3">
+        {decorated.map(({ order, items }) => (
+          <li class="rounded border border-gray-200 p-4 print:break-inside-avoid print:border print:p-2">
+            <header class="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <label class="flex cursor-pointer items-center gap-2 print:hidden">
+                <input
+                  type="checkbox"
+                  class="pack-checkbox h-6 w-6"
+                  data-order-id={order.order_id}
+                />
+                <span class="font-medium">{order.order_id}</span>
+              </label>
+              <span class="font-medium print:font-bold">
+                <span class="hidden print:inline">☐ {order.order_id}</span>
+                {order.name}
+              </span>
+              <span class="text-sm text-gray-600">{order.phone.slice(-4)}</span>
+              <span class="ml-auto text-sm font-medium">${order.total}</span>
+            </header>
+            <div class="text-base">
+              {items
+                .map((i) =>
+                  i.product
+                    ? `${i.product.name}${i.product.variant} ×${i.qty}`
+                    : `${i.sku} ×${i.qty}`,
+                )
+                .join("、")}
+            </div>
+            <div class="mt-2 text-sm text-gray-700 print:text-xs">
+              {order.address}
+            </div>
+            {order.notes && (
+              <div class="mt-1 rounded bg-yellow-50 px-2 py-1 text-xs text-yellow-800 print:bg-transparent print:text-black">
+                備註：{order.notes}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+
+    <p class="mt-6 text-xs text-gray-500 print:hidden">
+      勾選每張訂單表示該包已備齊。資料不寫入資料庫，重新整理會清空。
+    </p>
+  </main>
+
+  <style>
+    @media print {
+      @page {
+        size: A4;
+        margin: 1.5cm;
+      }
+      body {
+        font-family: -apple-system, "PingFang TC", sans-serif;
+      }
+    }
+  </style>
+
+  <script>
+    // Visual feedback only — no DB write.
+    document.querySelectorAll<HTMLInputElement>(".pack-checkbox").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const li = cb.closest("li")!;
+        li.classList.toggle("opacity-50", cb.checked);
+      });
+    });
+  </script>
+</Layout>
