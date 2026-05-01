@@ -19,7 +19,7 @@
     {
       "binding": "DB",
       "database_name": "mango-hsu-prod",
-      "database_id": "PASTE_PROD_D1_ID_HERE",
+      "database_id": "5e62f4ee-1cd6-4495-b476-b95fa756e2c8",
       "migrations_dir": "drizzle"
     }
   ],
@@ -28,7 +28,7 @@
   "kv_namespaces": [
     {
       "binding": "RATELIMIT",
-      "id": "PASTE_KV_ID_HERE"
+      "id": "91b765a3001a47a1a4ee61ac97d9d051"
     }
   ],
   // ---- Worker vars (non-secret) ----
@@ -46,18 +46,27 @@
   "env": {
     "stage": {
       "name": "mango-hsu-stage",
+      // vars don't inherit to env overrides, so we must restate them here.
+      "vars": {
+        "PUBLIC_ORDER_TOKEN": "REPLACE_AT_BUILD_TIME",
+        "BANK_ACCOUNT_DISPLAY": "808 玉山銀行 / 0901979086154 (STAGE)",
+        "SHIPPING_FEE_TWD": "80",
+        "FREE_SHIPPING_MIN_PACKAGES": "10",
+        "ETA_DAYS_AFTER_PAYMENT": "5",
+        "ACCEPTING_DRY": "true"
+      },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "mango-hsu-stage",
-          "database_id": "PASTE_STAGE_D1_ID_HERE",
+          "database_id": "abd4a95a-ba94-4a32-851d-c5eeb13199c0",
           "migrations_dir": "drizzle"
         }
       ],
       "kv_namespaces": [
         {
           "binding": "RATELIMIT",
-          "id": "PASTE_STAGE_KV_ID_HERE"
+          "id": "3c7807740837434688a43ab8cda83bb8"
         }
       ]
     },
@@ -70,7 +79,7 @@
         {
           "binding": "DB",
           "database_name": "mango-hsu-prod",
-          "database_id": "PASTE_PROD_D1_ID_HERE"
+          "database_id": "5e62f4ee-1cd6-4495-b476-b95fa756e2c8"
         }
       ],
       "triggers": {

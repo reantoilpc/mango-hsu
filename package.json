@@ -8,9 +8,9 @@
     "preview": "astro preview",
     "astro": "astro",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:stage": "wrangler d1 migrations apply mango-hsu-stage",
-    "db:migrate:prod": "wrangler d1 migrations apply mango-hsu-prod",
-    "db:export:prod": "wrangler d1 export mango-hsu-prod --output=backups/mango-$(date +%Y%m%d).sqlite"
+    "db:migrate:stage": "wrangler d1 migrations apply mango-hsu-stage --remote --env stage",
+    "db:migrate:prod": "wrangler d1 migrations apply mango-hsu-prod --remote",
+    "db:export:prod": "mkdir -p backups && wrangler d1 export mango-hsu-prod --remote --output=backups/mango-$(date +%Y%m%d).sqlite"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.3.0",
