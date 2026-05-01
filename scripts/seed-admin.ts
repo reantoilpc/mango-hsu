@@ -12,9 +12,7 @@ import { hashPassword } from "../src/lib/auth";
 type SeedAccount = { email: string; role: "admin" | "operator" };
 
 const ACCOUNTS: SeedAccount[] = [
-  { email: "rayhsu@example.com", role: "admin" },
-  // { email: "mom@example.com", role: "operator" },
-  // { email: "dad@example.com", role: "operator" },
+  { email: "reantoilpc@gmail.com", role: "admin" },
 ];
 
 function randomPassword(): string {

@@ -2,10 +2,14 @@ import { eq } from "drizzle-orm";
 import { admin_users, sessions } from "../db/schema";
 import type { AppEnv, Db } from "../db/client";
 
-// PBKDF2 iters: pin AFTER Saturday spike (see scripts/measure-pbkdf2.ts).
-// Candidates: 30k / 100k / 600k. Pick the highest that stays under ~8ms CPU on
-// Workers free tier 10ms/req. Stored format: pbkdf2$<iters>$<base64-salt>$<base64-hash>
-const DEFAULT_ITERS = 30_000;
+// PBKDF2 iters: pinned 2026-05-01 after measure-pbkdf2.ts spike on M-series Bun.
+// Bun timings: 10k→1ms, 30k→3ms, 100k→10ms, 600k→59ms.
+// Workers free-tier V8 isolate is ~3x slower than M-series Bun, so 20k → ~6ms,
+// well under the 10ms/req CPU cap with 30% headroom for cold starts.
+// OWASP 2026 recommends 600k, but that's infeasible on free tier; for a 5-user
+// family business this trade-off is acceptable. Salt is unique per user.
+// Format: pbkdf2$<iters>$<base64-salt>$<base64-hash>
+const DEFAULT_ITERS = 20_000;
 const SALT_LEN = 16;
 const HASH_LEN = 32; // 256 bits
 const SESSION_TTL_DAYS = 7;

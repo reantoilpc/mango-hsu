@@ -11,9 +11,8 @@ export type AppEnv = {
   FREE_SHIPPING_MIN_PACKAGES: string;
   ETA_DAYS_AFTER_PAYMENT: string;
   ACCEPTING_DRY: string;
-  // Secrets
+  // Secrets (set via `wrangler secret put`)
   ORDER_TOKEN: string;
-  ADMIN_SESSION_SECRET: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
   // Static assets binding (Astro Cloudflare adapter)
