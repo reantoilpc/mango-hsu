@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { authorizeAdmin, json, text } from "../../../../lib/admin-api";
 import { makeDb } from "../../../../db/client";
 import { admin_users, sessions } from "../../../../db/schema";
+import { env } from "../../../../lib/env";
 import {
   hashPassword,
   verifyPassword,
@@ -17,8 +18,7 @@ import {
 // Reason for blowing away other sessions: if attacker grabbed the old pw,
 // rotating here kicks them off everywhere.
 export const POST: APIRoute = async ({ request, locals }) => {
-  const env = locals.runtime?.env;
-  if (!env) return text("no runtime", 500);
+
 
   const auth = await authorizeAdmin(request, env);
   if (!auth.ok) return text(auth.reason, auth.status);

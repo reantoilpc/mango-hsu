@@ -9,6 +9,7 @@ import {
   buildSessionCookie,
 } from "../../lib/auth";
 import { audit_log } from "../../db/schema";
+import { env } from "../../lib/env";
 
 let errorMessage = "";
 
@@ -19,10 +20,7 @@ else if (errorCode === "no_runtime")
   errorMessage = "環境未就緒，請聯絡管理員。";
 
 if (Astro.request.method === "POST") {
-  const env = Astro.locals.runtime?.env;
-  if (!env) {
-    errorMessage = "環境未就緒，請聯絡管理員。";
-  } else {
+  {
     const formData = await Astro.request.formData();
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");

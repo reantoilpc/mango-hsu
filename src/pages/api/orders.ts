@@ -11,6 +11,7 @@ import {
   type OrderResponse,
 } from "../../lib/order-response";
 import { notifyOrder } from "../../lib/telegram";
+import { env } from "../../lib/env";
 
 interface OrderRequest {
   idempotency_key: string;
@@ -75,9 +76,7 @@ function isUniqueOnOrderId(err: unknown): boolean {
 }
 
 export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
-  const env = locals.runtime?.env;
   const ctx = locals.runtime?.ctx;
-  if (!env) return json({ ok: false, error_code: "INTERNAL" }, 500);
 
   const ip = request.headers.get("cf-connecting-ip") || clientAddress || "unknown";
   if (!(await checkOrderRate(env, ip))) {

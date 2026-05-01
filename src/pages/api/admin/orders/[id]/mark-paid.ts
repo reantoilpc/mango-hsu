@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm";
 import { makeDb } from "../../../../../db/client";
 import { orders, audit_log } from "../../../../../db/schema";
 import { authorizeAdmin, json, text } from "../../../../../lib/admin-api";
+import { env } from "../../../../../lib/env";
 
 export const POST: APIRoute = async ({ request, params, locals }) => {
-  const env = locals.runtime?.env;
-  if (!env) return text("no runtime", 500);
+
 
   const auth = await authorizeAdmin(request, env);
   if (!auth.ok) return text(auth.reason, auth.status);

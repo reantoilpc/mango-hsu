@@ -1,5 +1,6 @@
 import { defineMiddleware } from "astro:middleware";
-import { makeDb, type AppEnv } from "./db/client";
+import { makeDb } from "./db/client";
+import { env } from "./lib/env";
 import { verifySession, SESSION_COOKIE } from "./lib/auth";
 
 export const onRequest = defineMiddleware(async (ctx, next) => {
@@ -9,9 +10,6 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
 
   if (!isAdmin || isLogin) return next();
 
-  const env = ctx.locals.runtime?.env as AppEnv | undefined;
-  if (!env) return ctx.redirect("/admin/login?error=no_runtime");
-
   const token = ctx.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return ctx.redirect("/admin/login");
 
@@ -19,7 +17,6 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
   const session = await verifySession(db, token);
   if (!session) return ctx.redirect("/admin/login?error=expired");
 
-  // attach to locals for pages
   (ctx.locals as { session?: typeof session }).session = session;
   return next();
 });

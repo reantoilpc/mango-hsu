@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { authorizeAdmin, json, text } from "../../../../../lib/admin-api";
+import { env } from "../../../../../lib/env";
 
 // Cancel = hard delete the order (FK cascade clears order_items and audit_log).
 // Reason for hard delete: keeps the row count and SKU aggregates honest;
@@ -8,8 +9,7 @@ import { authorizeAdmin, json, text } from "../../../../../lib/admin-api";
 // PDPA-friendly. If you need a history of cancellations, switch to soft delete
 // in V3.
 export const POST: APIRoute = async ({ request, params, locals }) => {
-  const env = locals.runtime?.env;
-  if (!env) return text("no runtime", 500);
+
 
   const auth = await authorizeAdmin(request, env, "admin");
   if (!auth.ok) return text(auth.reason, auth.status);

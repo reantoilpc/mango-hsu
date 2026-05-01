@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { asc } from "drizzle-orm";
 import { makeDb } from "../../../db/client";
 import { products } from "../../../db/schema";
+import { env } from "../../../lib/env";
 
 interface SiteSettings {
   accepting_dry: boolean;
@@ -29,8 +30,7 @@ const json = (b: SiteSettings | { ok: false; error_code: string }, status = 200)
   });
 
 export const GET: APIRoute = async ({ locals }) => {
-  const env = locals.runtime?.env;
-  if (!env) return json({ ok: false, error_code: "INTERNAL" }, 500);
+
 
   const db = makeDb(env);
   const productRows = await db

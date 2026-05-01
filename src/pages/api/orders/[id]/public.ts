@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { eq } from "drizzle-orm";
 import { makeDb } from "../../../../db/client";
 import { orders } from "../../../../db/schema";
+import { env } from "../../../../lib/env";
 
 interface OrderStatusSuccess {
   ok: true;
@@ -26,8 +27,7 @@ const json = (b: OrderStatusResponse, status = 200) =>
   });
 
 export const GET: APIRoute = async ({ params, locals }) => {
-  const env = locals.runtime?.env;
-  if (!env) return json({ ok: false, error_code: "INTERNAL" }, 500);
+
 
   const id = params.id;
   if (!id || typeof id !== "string" || !/^M-\d{8}-\d{3}$/.test(id)) {
