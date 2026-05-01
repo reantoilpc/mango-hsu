@@ -35,3 +35,19 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# V2: D1 backups
+backups/
+
+# V2: V1 Sheet exports (PII)
+private/
+
+# V2: drizzle generated migrations are committed; .drizzle local cache is not
+.drizzle/
+
+# V2: generated SQL artifacts (don't commit raw imports / seed)
+import.sql
+seed-admin.sql
+
+# V2: Cloudflare Wrangler local state
+.wrangler/

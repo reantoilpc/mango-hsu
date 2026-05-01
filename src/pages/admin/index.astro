@@ -1,0 +1,96 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { makeDb } from "../../db/client";
+import { orders } from "../../db/schema";
+import { sql, desc, eq, and } from "drizzle-orm";
+
+const env = Astro.locals.runtime?.env;
+if (!env) return Astro.redirect("/admin/login?error=no_runtime");
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+
+const db = makeDb(env);
+
+const totalRow = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM orders`);
+const total = totalRow[0]?.n ?? 0;
+
+const pendingPaidRow = await db.all<{ n: number }>(
+  sql`SELECT COUNT(*) AS n FROM orders WHERE paid = 0`,
+);
+const pendingPaid = pendingPaidRow[0]?.n ?? 0;
+
+const pendingShipRow = await db.all<{ n: number }>(
+  sql`SELECT COUNT(*) AS n FROM orders WHERE paid = 1 AND shipped = 0`,
+);
+const pendingShip = pendingShipRow[0]?.n ?? 0;
+
+const recent = await db
+  .select()
+  .from(orders)
+  .orderBy(desc(orders.created_at))
+  .limit(5);
+---
+
+<Layout>
+  <main class="mx-auto max-w-3xl px-4 py-8">
+    <header class="mb-8 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">管理後台</h1>
+      <div class="text-sm text-gray-600">
+        {session.email} ({session.role})
+      </div>
+    </header>
+
+    <div class="mb-8 grid grid-cols-3 gap-4">
+      <div class="rounded border border-gray-200 p-4">
+        <div class="text-sm text-gray-600">總訂單</div>
+        <div class="mt-1 text-3xl font-bold">{total}</div>
+      </div>
+      <div class="rounded border border-gray-200 p-4">
+        <div class="text-sm text-gray-600">待付款</div>
+        <div class="mt-1 text-3xl font-bold text-amber-600">{pendingPaid}</div>
+      </div>
+      <div class="rounded border border-gray-200 p-4">
+        <div class="text-sm text-gray-600">待出貨</div>
+        <div class="mt-1 text-3xl font-bold text-orange-600">{pendingShip}</div>
+      </div>
+    </div>
+
+    <h2 class="mb-3 text-lg font-bold">最近訂單</h2>
+    <ul class="divide-y divide-gray-200 rounded border border-gray-200">
+      {recent.map((o) => (
+        <li class="px-4 py-3 flex items-center justify-between">
+          <div>
+            <a href={`/admin/orders/${o.order_id}`} class="font-medium underline">
+              {o.order_id}
+            </a>
+            <span class="ml-2 text-gray-600">{o.name}</span>
+          </div>
+          <div class="text-sm">
+            {o.paid ? "已付款" : "待付款"} ／ {o.shipped ? "已出貨" : "待出貨"}
+          </div>
+        </li>
+      ))}
+      {recent.length === 0 && (
+        <li class="px-4 py-3 text-sm text-gray-500">（尚無訂單）</li>
+      )}
+    </ul>
+
+    <nav class="mt-8 flex gap-3">
+      <a
+        href="/admin/orders"
+        class="rounded bg-orange-600 px-4 py-2 text-white hover:bg-orange-700"
+      >
+        訂單列表
+      </a>
+      {session.role === "admin" && (
+        <a
+          href="/admin/products"
+          class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"
+        >
+          商品管理
+        </a>
+      )}
+    </nav>
+  </main>
+</Layout>

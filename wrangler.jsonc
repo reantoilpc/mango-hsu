@@ -2,11 +2,80 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "mango-hsu",
   "compatibility_date": "2026-04-19",
+  "compatibility_flags": ["nodejs_compat"],
+  // Note: `main` is intentionally omitted for the top-level (Astro) worker.
+  // @astrojs/cloudflare 13.x vite plugin sets it during build to dist/_worker.js/index.js.
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     "not_found_handling": "404-page"
   },
   "observability": {
     "enabled": true
+  },
+  // ---- D1 ----
+  // After running `wrangler d1 create mango-hsu-prod`, paste the database_id below.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mango-hsu-prod",
+      "database_id": "PASTE_PROD_D1_ID_HERE",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  // ---- KV (rate limit) ----
+  // After `wrangler kv namespace create RATELIMIT`, paste id below.
+  "kv_namespaces": [
+    {
+      "binding": "RATELIMIT",
+      "id": "PASTE_KV_ID_HERE"
+    }
+  ],
+  // ---- Worker vars (non-secret) ----
+  // Secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ORDER_TOKEN, ADMIN_SESSION_SECRET)
+  // are NOT here; set with `wrangler secret put NAME`.
+  "vars": {
+    "PUBLIC_ORDER_TOKEN": "REPLACE_AT_BUILD_TIME",
+    "BANK_ACCOUNT_DISPLAY": "808 玉山銀行 / 0901979086154",
+    "SHIPPING_FEE_TWD": "80",
+    "FREE_SHIPPING_MIN_PACKAGES": "10",
+    "ETA_DAYS_AFTER_PAYMENT": "5",
+    "ACCEPTING_DRY": "true"
+  },
+  // ---- Per-env overrides ----
+  "env": {
+    "stage": {
+      "name": "mango-hsu-stage",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mango-hsu-stage",
+          "database_id": "PASTE_STAGE_D1_ID_HERE",
+          "migrations_dir": "drizzle"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "RATELIMIT",
+          "id": "PASTE_STAGE_KV_ID_HERE"
+        }
+      ]
+    },
+    "cron": {
+      "name": "mango-hsu-cron",
+      "main": "./src/cron-worker.ts",
+      "compatibility_date": "2026-04-19",
+      "compatibility_flags": ["nodejs_compat"],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mango-hsu-prod",
+          "database_id": "PASTE_PROD_D1_ID_HERE"
+        }
+      ],
+      "triggers": {
+        "crons": ["0 18 * * 0"]
+      }
+    }
   }
 }

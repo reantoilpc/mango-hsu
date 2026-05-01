@@ -1,0 +1,109 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { makeDb } from "../../db/client";
+import { admin_users } from "../../db/schema";
+import { eq } from "drizzle-orm";
+import {
+  verifyPassword,
+  createSession,
+  buildSessionCookie,
+} from "../../lib/auth";
+import { audit_log } from "../../db/schema";
+
+let errorMessage = "";
+
+const url = new URL(Astro.request.url);
+const errorCode = url.searchParams.get("error");
+if (errorCode === "expired") errorMessage = "登入已過期，請重新登入。";
+else if (errorCode === "no_runtime")
+  errorMessage = "環境未就緒，請聯絡管理員。";
+
+if (Astro.request.method === "POST") {
+  const env = Astro.locals.runtime?.env;
+  if (!env) {
+    errorMessage = "環境未就緒，請聯絡管理員。";
+  } else {
+    const formData = await Astro.request.formData();
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    const db = makeDb(env);
+
+    if (!email || !password) {
+      errorMessage = "請輸入 email 跟密碼。";
+    } else {
+      const rows = await db
+        .select()
+        .from(admin_users)
+        .where(eq(admin_users.email, email))
+        .limit(1);
+      const user = rows[0];
+
+      if (user && (await verifyPassword(password, user.password_hash))) {
+        const { token, expiresAt } = await createSession(db, user.email);
+        await db.insert(audit_log).values({
+          ts: new Date().toISOString(),
+          user_email: user.email,
+          action: "login_success",
+        });
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: user.must_change_password
+              ? "/admin/change-password"
+              : "/admin",
+            "Set-Cookie": buildSessionCookie(token, expiresAt),
+          },
+        });
+      }
+
+      await db.insert(audit_log).values({
+        ts: new Date().toISOString(),
+        user_email: email || "<unknown>",
+        action: "login_fail",
+      });
+      errorMessage = "Email 或密碼錯誤。";
+    }
+  }
+}
+---
+
+<Layout>
+  <main class="mx-auto max-w-sm px-4 py-12">
+    <h1 class="text-2xl font-bold mb-6">管理後台登入</h1>
+    {errorMessage && (
+      <div class="mb-4 rounded bg-red-50 px-4 py-3 text-sm text-red-700">
+        {errorMessage}
+      </div>
+    )}
+    <form method="POST" class="space-y-4">
+      <div>
+        <label for="email" class="block text-sm font-medium mb-1">Email</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          required
+          autocomplete="username"
+          class="w-full rounded border border-gray-300 px-3 py-2 text-base"
+        />
+      </div>
+      <div>
+        <label for="password" class="block text-sm font-medium mb-1">密碼</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          required
+          autocomplete="current-password"
+          class="w-full rounded border border-gray-300 px-3 py-2 text-base"
+        />
+      </div>
+      <button
+        type="submit"
+        class="w-full rounded bg-orange-600 px-4 py-3 text-base font-medium text-white hover:bg-orange-700"
+      >
+        登入
+      </button>
+    </form>
+  </main>
+</Layout>

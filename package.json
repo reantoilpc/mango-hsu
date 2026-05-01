@@ -6,15 +6,24 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:stage": "wrangler d1 migrations apply mango-hsu-stage",
+    "db:migrate:prod": "wrangler d1 migrations apply mango-hsu-prod",
+    "db:export:prod": "wrangler d1 export mango-hsu-prod --output=backups/mango-$(date +%Y%m%d).sqlite"
   },
   "dependencies": {
-    "astro": "^6.1.8"
+    "@astrojs/cloudflare": "^13.3.0",
+    "astro": "^6.1.8",
+    "drizzle-orm": "^0.36.4"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.8",
+    "@cloudflare/workers-types": "^4.20260101.0",
     "@tailwindcss/vite": "^4.2.2",
+    "drizzle-kit": "^0.30.1",
     "tailwindcss": "^4.2.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "wrangler": "^4.0.0"
   }
 }
