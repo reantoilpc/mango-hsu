@@ -43,7 +43,7 @@ async function pbkdf2(
     ["deriveBits"],
   );
   const bits = await subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: iters },
+    { name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations: iters },
     key,
     HASH_LEN * 8,
   );

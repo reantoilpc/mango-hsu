@@ -1,0 +1,114 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { makeDb } from "../../db/client";
+import { audit_log } from "../../db/schema";
+import { and, desc, eq, gte, lte, like } from "drizzle-orm";
+import { formatTaipei } from "../../lib/formatters";
+
+const env = Astro.locals.runtime?.env;
+if (!env) return Astro.redirect("/admin/login?error=no_runtime");
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+
+const url = new URL(Astro.request.url);
+const fromDate = url.searchParams.get("from") ?? "";
+const toDate = url.searchParams.get("to") ?? "";
+const userFilter = (url.searchParams.get("user") ?? "").trim();
+const actionFilter = (url.searchParams.get("action") ?? "").trim();
+
+const db = makeDb(env);
+const conds = [] as ReturnType<typeof eq>[];
+if (fromDate) conds.push(gte(audit_log.ts, fromDate + "T00:00:00Z"));
+if (toDate) conds.push(lte(audit_log.ts, toDate + "T23:59:59Z"));
+if (userFilter) conds.push(like(audit_log.user_email, `%${userFilter}%`));
+if (actionFilter) conds.push(eq(audit_log.action, actionFilter));
+
+const rows = await db
+  .select()
+  .from(audit_log)
+  .where(conds.length ? and(...conds) : undefined)
+  .orderBy(desc(audit_log.ts))
+  .limit(500);
+
+const knownActions = [
+  "",
+  "login_success",
+  "login_fail",
+  "password_changed",
+  "mark_paid",
+  "mark_shipped",
+  "bulk_mark_shipped",
+  "update_tracking",
+  "edit",
+  "cancel",
+  "product_update",
+  "product_create",
+  "telegram_failed",
+];
+---
+
+<Layout title="變更紀錄">
+  <main class="mx-auto max-w-5xl px-4 py-6">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">變更紀錄</h1>
+      <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
+    </header>
+
+    <form method="GET" class="mb-4 grid grid-cols-2 gap-2 rounded border border-gray-200 bg-gray-50 p-3 sm:grid-cols-5">
+      <label class="text-sm">
+        <span class="block text-xs text-gray-600">起</span>
+        <input type="date" name="from" value={fromDate} class="w-full rounded border border-gray-300 px-2 py-1 text-sm" />
+      </label>
+      <label class="text-sm">
+        <span class="block text-xs text-gray-600">迄</span>
+        <input type="date" name="to" value={toDate} class="w-full rounded border border-gray-300 px-2 py-1 text-sm" />
+      </label>
+      <label class="text-sm">
+        <span class="block text-xs text-gray-600">操作者 email</span>
+        <input type="text" name="user" value={userFilter} placeholder="部分相符" class="w-full rounded border border-gray-300 px-2 py-1 text-sm" />
+      </label>
+      <label class="text-sm">
+        <span class="block text-xs text-gray-600">動作</span>
+        <select name="action" class="w-full rounded border border-gray-300 px-2 py-1 text-sm">
+          {knownActions.map((a) => (
+            <option value={a} selected={a === actionFilter}>{a || "（全部）"}</option>
+          ))}
+        </select>
+      </label>
+      <div class="flex items-end gap-2">
+        <button type="submit" class="rounded bg-orange-600 px-3 py-1.5 text-sm text-white hover:bg-orange-700">
+          套用
+        </button>
+        <a href="/admin/audit" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-white">
+          清除
+        </a>
+      </div>
+    </form>
+
+    <p class="mb-2 text-xs text-gray-500">
+      最多顯示 500 筆，按時間新到舊排序。{rows.length === 500 && "（已截斷，請收窄日期範圍）"}
+    </p>
+
+    <ul class="divide-y divide-gray-200 rounded border border-gray-200">
+      {rows.map((a) => (
+        <li class="px-4 py-2 text-sm">
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span class="font-mono text-xs text-gray-500">{formatTaipei(a.ts)}</span>
+            <span class="font-medium">{a.user_email}</span>
+            <span class="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">{a.action}</span>
+            {a.order_id && (
+              <a href={`/admin/orders/${a.order_id}`} class="text-xs text-blue-700 underline">{a.order_id}</a>
+            )}
+          </div>
+          {a.details && (
+            <div class="mt-0.5 break-all font-mono text-xs text-gray-500">{a.details}</div>
+          )}
+        </li>
+      ))}
+      {rows.length === 0 && (
+        <li class="px-4 py-8 text-center text-sm text-gray-500">（無符合條件的紀錄）</li>
+      )}
+    </ul>
+  </main>
+</Layout>

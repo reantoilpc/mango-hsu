@@ -2,11 +2,14 @@
 import "../styles/global.css";
 
 interface Props {
-  title: string;
+  title?: string;
   description?: string;
 }
 
-const { title, description = "自家栽種、自家加工的金煌與愛文芒果乾。產季限量供應。" } = Astro.props;
+const {
+  title = "芒果許",
+  description = "自家栽種、自家加工的金煌與愛文芒果乾。產季限量供應。",
+} = Astro.props;
 ---
 
 <!doctype html>

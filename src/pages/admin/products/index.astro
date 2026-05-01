@@ -1,0 +1,167 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { makeDb } from "../../../db/client";
+import { products } from "../../../db/schema";
+import { asc } from "drizzle-orm";
+
+const env = Astro.locals.runtime?.env;
+if (!env) return Astro.redirect("/admin/login?error=no_runtime");
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+if (session.role !== "admin") {
+  return new Response("admin only", { status: 403 });
+}
+
+const db = makeDb(env);
+const productRows = await db
+  .select()
+  .from(products)
+  .orderBy(asc(products.display_order), asc(products.sku));
+---
+
+<Layout title="商品管理">
+  <main class="mx-auto max-w-3xl px-4 py-6">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">商品管理</h1>
+      <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
+    </header>
+
+    <p class="mb-4 text-sm text-gray-600">
+      下架某商品就把「上架」取消勾選；不要刪 SKU（會破壞舊訂單品項關聯）。
+    </p>
+
+    <ul class="mb-8 divide-y divide-gray-200 rounded border border-gray-200">
+      {productRows.map((p) => (
+        <li class="px-4 py-3">
+          <form class="prod-form grid grid-cols-1 gap-2 sm:grid-cols-[10rem_1fr_8rem_6rem_5rem_5rem]" data-sku={p.sku}>
+            <div class="font-mono text-sm text-gray-700 self-center">{p.sku}</div>
+            <input
+              type="text"
+              name="name"
+              value={p.name}
+              required
+              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              placeholder="名稱"
+            />
+            <input
+              type="text"
+              name="variant"
+              value={p.variant}
+              required
+              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              placeholder="規格"
+            />
+            <input
+              type="number"
+              name="price"
+              value={p.price}
+              required
+              min="0"
+              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              placeholder="價格"
+            />
+            <input
+              type="number"
+              name="display_order"
+              value={p.display_order}
+              required
+              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              placeholder="順序"
+            />
+            <label class="flex items-center justify-center gap-1 text-sm">
+              <input type="checkbox" name="available" checked={p.available} />
+              <span>上架</span>
+            </label>
+            <button
+              type="submit"
+              class="col-span-full sm:col-auto sm:col-start-6 rounded bg-orange-600 px-3 py-1.5 text-sm text-white hover:bg-orange-700"
+            >
+              儲存
+            </button>
+          </form>
+        </li>
+      ))}
+      {productRows.length === 0 && (
+        <li class="px-4 py-6 text-center text-sm text-gray-500">（尚無商品）</li>
+      )}
+    </ul>
+
+    <section class="rounded border border-amber-200 bg-amber-50 p-4">
+      <h2 class="mb-3 text-lg font-bold">新增商品</h2>
+      <form id="create-form" class="grid grid-cols-1 gap-2 sm:grid-cols-[10rem_1fr_8rem_6rem_5rem_5rem]">
+        <input
+          type="text"
+          name="sku"
+          required
+          pattern="[A-Z0-9_-]+"
+          class="rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+          placeholder="SKU（英數）"
+        />
+        <input type="text" name="name" required class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="名稱" />
+        <input type="text" name="variant" required class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="規格" />
+        <input type="number" name="price" required min="0" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="價格" />
+        <input type="number" name="display_order" required value="0" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="順序" />
+        <label class="flex items-center justify-center gap-1 text-sm">
+          <input type="checkbox" name="available" checked />
+          <span>上架</span>
+        </label>
+        <button
+          type="submit"
+          class="col-span-full sm:col-auto sm:col-start-6 rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700"
+        >
+          新增
+        </button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    function readForm(form: HTMLFormElement) {
+      const fd = new FormData(form);
+      return {
+        name: String(fd.get("name") ?? "").trim(),
+        variant: String(fd.get("variant") ?? "").trim(),
+        price: Number(fd.get("price") ?? 0),
+        available: fd.get("available") === "on",
+        display_order: Number(fd.get("display_order") ?? 0),
+      };
+    }
+
+    document.querySelectorAll<HTMLFormElement>(".prod-form").forEach((form) => {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const sku = form.dataset.sku!;
+        const data = readForm(form);
+        const res = await fetch(`/api/admin/products/${encodeURIComponent(sku)}/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (res.ok) location.reload();
+        else alert("儲存失敗：" + (await res.text()));
+      });
+    });
+
+    const createForm = document.getElementById("create-form") as HTMLFormElement | null;
+    createForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(createForm);
+      const data = {
+        sku: String(fd.get("sku") ?? "").trim(),
+        ...readForm(createForm),
+      };
+      if (!/^[A-Z0-9_-]+$/.test(data.sku)) {
+        alert("SKU 只能大寫英數、底線、連字號");
+        return;
+      }
+      const res = await fetch("/api/admin/products/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) location.reload();
+      else alert("新增失敗：" + (await res.text()));
+    });
+  </script>
+</Layout>

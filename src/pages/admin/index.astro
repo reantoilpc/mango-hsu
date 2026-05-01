@@ -76,7 +76,7 @@ const recent = await db
       )}
     </ul>
 
-    <nav class="mt-8 flex gap-3">
+    <nav class="mt-8 flex flex-wrap gap-3">
       <a
         href="/admin/orders"
         class="rounded bg-orange-600 px-4 py-2 text-white hover:bg-orange-700"
@@ -91,6 +91,18 @@ const recent = await db
           商品管理
         </a>
       )}
+      <a
+        href="/admin/audit"
+        class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"
+      >
+        變更紀錄
+      </a>
+      <a
+        href="/admin/change-password"
+        class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"
+      >
+        變更密碼
+      </a>
     </nav>
   </main>
 </Layout>
