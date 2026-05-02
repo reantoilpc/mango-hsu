@@ -1,9 +1,9 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getStatus } from "../lib/api";
-import { FALLBACK_SETTINGS } from "../lib/fallback-data";
+import { env } from "../lib/env";
+import { loadSiteSettings } from "../lib/site-settings";
 
-const settings = (await getStatus()) ?? FALLBACK_SETTINGS;
+const settings = await loadSiteSettings(env);
 const accepting = settings.accepting_dry;
 ---
 
