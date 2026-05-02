@@ -7,10 +7,9 @@ import type { SessionInfo } from "./lib/auth";
 declare global {
   namespace App {
     interface Locals {
-      runtime?: {
-        env: AppEnv;
-        ctx: { waitUntil(p: Promise<unknown>): void };
-      };
+      // Astro 6 / @astrojs/cloudflare 13: env moved to `cloudflare:workers` import,
+      // ctx moved to `Astro.locals.cfContext`. Old `runtime` shape kept off-type.
+      cfContext?: { waitUntil(p: Promise<unknown>): void };
       session?: SessionInfo;
     }
   }

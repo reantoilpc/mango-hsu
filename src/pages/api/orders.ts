@@ -76,7 +76,7 @@ function isUniqueOnOrderId(err: unknown): boolean {
 }
 
 export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
-  const ctx = locals.runtime?.ctx;
+  const ctx = locals.cfContext;
 
   const ip = request.headers.get("cf-connecting-ip") || clientAddress || "unknown";
   if (!(await checkOrderRate(env, ip))) {
