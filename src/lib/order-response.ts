@@ -30,8 +30,8 @@ export interface OrderError {
 
 export type OrderResponse = OrderSuccess | OrderError;
 
-const STATUS_URL_BASE = "https://mango-hsu.rayclaw-worker.workers.dev/status";
-
+// Relative URL so the customer's status link works regardless of which env
+// (stage / prod / future custom domain) the order was placed on. Same-origin.
 export function shippingFor(items: Array<{ qty: number }>, env: AppEnv): number {
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const minFree = parseInt(env.FREE_SHIPPING_MIN_PACKAGES, 10) || 10;
@@ -44,7 +44,7 @@ export function expectedMemoFor(orderId: string, name: string): string {
 }
 
 export function statusUrlFor(orderId: string): string {
-  return `${STATUS_URL_BASE}?id=${encodeURIComponent(orderId)}`;
+  return `/status?id=${encodeURIComponent(orderId)}`;
 }
 
 export function assembleOrderSuccess(
