@@ -34,8 +34,11 @@ const productRows = await db
     <ul class="mb-8 divide-y divide-gray-200 rounded border border-gray-200">
       {productRows.map((p) => (
         <li class="px-4 py-3">
-          <form class="prod-form grid grid-cols-1 gap-2 sm:grid-cols-[10rem_1fr_8rem_6rem_5rem_5rem]" data-sku={p.sku}>
-            <div class="font-mono text-sm text-gray-700 self-center">{p.sku}</div>
+          <form
+            class="prod-form grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem]"
+            data-sku={p.sku}
+          >
+            <div class="font-mono text-sm text-gray-700">{p.sku}</div>
             <input
               type="text"
               name="name"
@@ -75,7 +78,7 @@ const productRows = await db
             </label>
             <button
               type="submit"
-              class="col-span-full sm:col-auto sm:col-start-6 rounded bg-orange-600 px-3 py-1.5 text-sm text-white hover:bg-orange-700"
+              class="col-span-2 rounded bg-orange-600 px-3 py-1.5 text-sm text-white hover:bg-orange-700 sm:col-span-1"
             >
               儲存
             </button>
@@ -89,14 +92,17 @@ const productRows = await db
 
     <section class="rounded border border-amber-200 bg-amber-50 p-4">
       <h2 class="mb-3 text-lg font-bold">新增商品</h2>
-      <form id="create-form" class="grid grid-cols-1 gap-2 sm:grid-cols-[10rem_1fr_8rem_6rem_5rem_5rem]">
+      <form
+        id="create-form"
+        class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem]"
+      >
         <input
           type="text"
           name="sku"
           required
           pattern="[A-Z0-9_-]+"
           class="rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
-          placeholder="SKU（英數）"
+          placeholder="SKU"
         />
         <input type="text" name="name" required class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="名稱" />
         <input type="text" name="variant" required class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="規格" />
@@ -108,7 +114,7 @@ const productRows = await db
         </label>
         <button
           type="submit"
-          class="col-span-full sm:col-auto sm:col-start-6 rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700"
+          class="col-span-2 rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700 sm:col-span-1"
         >
           新增
         </button>
