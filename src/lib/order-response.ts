@@ -46,8 +46,8 @@ export function expectedMemoFor(orderId: string, name: string): string {
   return `${orderId}-${name}`;
 }
 
-export function statusUrlFor(orderId: string): string {
-  return `/status?id=${encodeURIComponent(orderId)}`;
+export function statusUrlFor(orderId: string, phoneLast4: string): string {
+  return `/status?id=${encodeURIComponent(orderId)}&p=${phoneLast4}`;
 }
 
 export async function assembleOrderSuccess(
@@ -55,10 +55,11 @@ export async function assembleOrderSuccess(
   _items: OrderItem[],
   env: AppEnv,
 ): Promise<OrderSuccess> {
+  const phoneLast4 = order.phone.slice(-4);
   let liffBindUrl: string | null = null;
   if (env.LINE_LIFF_ID && env.LIFF_BIND_HMAC_SECRET) {
     try {
-      const parts = await buildLiffBindUrl(order.order_id, env);
+      const parts = await buildLiffBindUrl(order.order_id, phoneLast4, env);
       liffBindUrl = parts.url;
     } catch {
       liffBindUrl = null;
@@ -73,8 +74,8 @@ export async function assembleOrderSuccess(
     expected_memo: order.expected_memo,
     bank_account_display: env.BANK_ACCOUNT_DISPLAY,
     eta_days_after_payment: parseInt(env.ETA_DAYS_AFTER_PAYMENT, 10) || 5,
-    status_url: statusUrlFor(order.order_id),
+    status_url: statusUrlFor(order.order_id, phoneLast4),
     liff_bind_url: liffBindUrl,
-    phone_last4: order.phone.slice(-4),
+    phone_last4: phoneLast4,
   };
 }

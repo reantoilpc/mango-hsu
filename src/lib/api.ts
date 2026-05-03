@@ -75,10 +75,12 @@ export async function submitOrder(
 
 export async function getOrderStatus(
   orderId: string,
+  phoneLast4: string,
 ): Promise<OrderStatusResponse> {
   const ctrl = withTimeout(FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/public`, {
+    const url = `/api/orders/${encodeURIComponent(orderId)}/public?p=${encodeURIComponent(phoneLast4)}`;
+    const res = await fetch(url, {
       method: "GET",
       signal: ctrl.signal,
     });

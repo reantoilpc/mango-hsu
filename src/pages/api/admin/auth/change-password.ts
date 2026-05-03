@@ -31,7 +31,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
   const current = String(body.current_password ?? "");
   const next = String(body.new_password ?? "");
-  if (next.length < 8) return text("new password too short", 400);
+  // 12-char min: NIST SP 800-63B 2024 floor without breach check; aligns with
+  // /cso 2026-05-03 finding #8 (weak min length combined with no rate limit
+  // produced a real brute-force vector before login throttle was added).
+  if (next.length < 12) return text("new password too short (min 12)", 400);
   if (next.length > 200) return text("new password too long", 400);
   if (next === current) return text("new password must differ", 400);
 

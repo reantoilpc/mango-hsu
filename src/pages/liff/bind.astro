@@ -90,6 +90,7 @@ const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
         function readParams() {
           const direct = new URLSearchParams(window.location.search);
           let order = direct.get("order");
+          let p = direct.get("p");
           let exp = direct.get("exp");
           let sig = direct.get("sig");
           if (!order) {
@@ -98,13 +99,14 @@ const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
               const stateStr = liffState.startsWith("?") ? liffState.slice(1) : liffState;
               const stateParams = new URLSearchParams(stateStr);
               order = stateParams.get("order");
+              p = stateParams.get("p");
               exp = stateParams.get("exp");
               sig = stateParams.get("sig");
             }
           }
-          return { order: order || "", exp: parseInt(exp || "0", 10), sig: sig || "" };
+          return { order: order || "", p: p || "", exp: parseInt(exp || "0", 10), sig: sig || "" };
         }
-        const { order: orderId, exp, sig } = readParams();
+        const { order: orderId, p: phoneLast4, exp, sig } = readParams();
 
         const $ = (id) => document.getElementById(id);
         const show = (id) => {
@@ -120,10 +122,13 @@ const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
           $(id)?.classList.remove("hidden");
         };
 
-        $("link-status-fallback").href = orderId ? `/status?id=${encodeURIComponent(orderId)}` : "/status";
-        $("link-regen").href = orderId ? `/status?id=${encodeURIComponent(orderId)}` : "/order";
+        const statusHref = orderId
+          ? `/status?id=${encodeURIComponent(orderId)}${phoneLast4 ? `&p=${phoneLast4}` : ""}`
+          : "/status";
+        $("link-status-fallback").href = statusHref;
+        $("link-regen").href = statusHref;
 
-        if (!orderId || !exp || !sig) {
+        if (!orderId || !phoneLast4 || !exp || !sig) {
           $("error-init-detail").textContent = "連結參數缺失，請從訂單頁重新進入。";
           show("state-error-init");
           return;
@@ -186,6 +191,7 @@ const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 order_id: orderId,
+                p: phoneLast4,
                 exp: exp,
                 sig: sig,
                 line_user_id: profile.userId,
@@ -222,9 +228,7 @@ const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
             }
           } catch {}
           if (!closed) {
-            window.location.href = orderId
-              ? `/status?id=${encodeURIComponent(orderId)}`
-              : "/status";
+            window.location.href = statusHref;
           }
         });
 

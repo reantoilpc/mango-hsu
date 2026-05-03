@@ -8,6 +8,7 @@ import { checkLiffBindRate } from "../../../lib/rate-limit";
 
 interface BindRequest {
   order_id: string;
+  p: string;
   exp: number;
   sig: string;
   line_user_id: string;
@@ -35,6 +36,9 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   if (typeof body.order_id !== "string" || !/^M-\d{8}-\d{3}$/.test(body.order_id)) {
     return json({ ok: false, error: "invalid_order_id" }, 400);
   }
+  if (typeof body.p !== "string" || !/^\d{4}$/.test(body.p)) {
+    return json({ ok: false, error: "invalid_p" }, 400);
+  }
   if (typeof body.line_user_id !== "string" || body.line_user_id.length === 0 || body.line_user_id.length > 100) {
     return json({ ok: false, error: "invalid_line_user_id" }, 400);
   }
@@ -44,7 +48,7 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     return json({ ok: false, error: "invalid_sig" }, 400);
   }
 
-  const verify = await verifyLiffBindSig(body.order_id, exp, body.sig, env);
+  const verify = await verifyLiffBindSig(body.order_id, body.p, exp, body.sig, env);
   if (!verify.ok) return json({ ok: false, error: verify.reason }, 400);
 
   const db = makeDb(env);

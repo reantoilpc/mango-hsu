@@ -10,6 +10,16 @@ import {
 } from "../../lib/auth";
 import { audit_log } from "../../db/schema";
 import { env } from "../../lib/env";
+import { requireSameOrigin } from "../../lib/csrf";
+import { checkLoginIpRate, checkLoginEmailRate } from "../../lib/rate-limit";
+
+// Timing equalizer (cso 2026-05-03 finding #7). When the email doesn't exist,
+// we still run PBKDF2 against this dummy hash so the response time doesn't
+// reveal whether the email is registered. Format-valid (parts.length === 4,
+// pbkdf2 prefix, iters >= 1000) so verifyPassword does the real work and
+// returns false on the zero-hash compare.
+const DUMMY_HASH =
+  "pbkdf2$20000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 let errorMessage = "";
 
@@ -20,13 +30,35 @@ else if (errorCode === "no_runtime")
   errorMessage = "環境未就緒，請聯絡管理員。";
 
 if (Astro.request.method === "POST") {
-  {
+  // CSRF (cso finding #9) — login.astro handles its own POST and never went
+  // through authorizeAdmin. Reject cross-origin form posts (login fixation).
+  if (!requireSameOrigin(Astro.request)) {
+    errorMessage = "請從登入頁重試。";
+  } else {
     const formData = await Astro.request.formData();
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const db = makeDb(env);
 
-    if (!email || !password) {
+    // Rate limit (cso finding #1) — per-IP first, then per-email.
+    const ip =
+      Astro.request.headers.get("cf-connecting-ip") || Astro.clientAddress || "unknown";
+
+    if (!(await checkLoginIpRate(env, ip))) {
+      errorMessage = "嘗試過於頻繁，請 15 分鐘後再試。";
+      await db.insert(audit_log).values({
+        ts: new Date().toISOString(),
+        user_email: email || "<unknown>",
+        action: "login_rate_limited_ip",
+      });
+    } else if (email && !(await checkLoginEmailRate(env, email))) {
+      errorMessage = "此帳號暫時鎖定，請 15 分鐘後再試。";
+      await db.insert(audit_log).values({
+        ts: new Date().toISOString(),
+        user_email: email,
+        action: "login_rate_limited_email",
+      });
+    } else if (!email || !password) {
       errorMessage = "請輸入 email 跟密碼。";
     } else {
       const rows = await db
@@ -36,7 +68,11 @@ if (Astro.request.method === "POST") {
         .limit(1);
       const user = rows[0];
 
-      if (user && (await verifyPassword(password, user.password_hash))) {
+      // Always run PBKDF2 — see DUMMY_HASH note.
+      const hashToCheck = user?.password_hash ?? DUMMY_HASH;
+      const ok = await verifyPassword(password, hashToCheck);
+
+      if (user && ok) {
         const { token, expiresAt } = await createSession(db, user.email);
         await db.insert(audit_log).values({
           ts: new Date().toISOString(),

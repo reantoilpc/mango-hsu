@@ -29,3 +29,51 @@ export async function checkLiffBindRate(env: AppEnv, ip: string): Promise<boolea
   });
   return true;
 }
+
+// /admin/login throttle. Two-layer: per-IP catches single-source brute force;
+// per-email catches cross-IP attempts on a specific account. 15-min window so
+// a DoS-by-lockout against a known admin email recovers fast.
+const LOGIN_IP_LIMIT = 5;
+const LOGIN_IP_WINDOW_SECONDS = 15 * 60;
+
+export async function checkLoginIpRate(env: AppEnv, ip: string): Promise<boolean> {
+  const key = `rl:login_ip:${ip}`;
+  const cur = await env.RATELIMIT.get(key);
+  const count = cur ? parseInt(cur, 10) : 0;
+  if (!Number.isFinite(count)) return false;
+  if (count >= LOGIN_IP_LIMIT) return false;
+  await env.RATELIMIT.put(key, String(count + 1), {
+    expirationTtl: LOGIN_IP_WINDOW_SECONDS,
+  });
+  return true;
+}
+
+const LOGIN_EMAIL_LIMIT = 10;
+const LOGIN_EMAIL_WINDOW_SECONDS = 15 * 60;
+
+export async function checkLoginEmailRate(env: AppEnv, email: string): Promise<boolean> {
+  const key = `rl:login_email:${email.toLowerCase()}`;
+  const cur = await env.RATELIMIT.get(key);
+  const count = cur ? parseInt(cur, 10) : 0;
+  if (!Number.isFinite(count)) return false;
+  if (count >= LOGIN_EMAIL_LIMIT) return false;
+  await env.RATELIMIT.put(key, String(count + 1), {
+    expirationTtl: LOGIN_EMAIL_WINDOW_SECONDS,
+  });
+  return true;
+}
+
+const PUBLIC_STATUS_LIMIT = 30;
+const PUBLIC_STATUS_WINDOW_SECONDS = 60 * 60;
+
+export async function checkPublicStatusRate(env: AppEnv, ip: string): Promise<boolean> {
+  const key = `rl:public_status:${ip}`;
+  const cur = await env.RATELIMIT.get(key);
+  const count = cur ? parseInt(cur, 10) : 0;
+  if (!Number.isFinite(count)) return false;
+  if (count >= PUBLIC_STATUS_LIMIT) return false;
+  await env.RATELIMIT.put(key, String(count + 1), {
+    expirationTtl: PUBLIC_STATUS_WINDOW_SECONDS,
+  });
+  return true;
+}

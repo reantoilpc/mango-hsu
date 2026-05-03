@@ -40,6 +40,6 @@ export const GET: APIRoute = async ({ params, request, url, clientAddress }) => 
     return json({ ok: false, error: "phone_mismatch" }, 403);
   }
 
-  const parts = await buildLiffBindUrl(order.order_id, env);
+  const parts = await buildLiffBindUrl(order.order_id, phoneLast4, env);
   return json({ ok: true, liff_bind_url: parts.url, exp: parts.exp });
 };

@@ -42,14 +42,25 @@ export interface LiffBindUrlParts {
   sig: string;
 }
 
+// HMAC payload includes phone-last-4 (cso 2026-05-03 finding #10): the prior
+// design protected the bind URL only via expiry + abuse rule. Anyone who
+// intercepted the URL inside its 30-min window (qrserver leak, screenshot
+// shared in LINE chat, etc.) could bind their own LINE user before the
+// customer. Phone last-4 in the payload means the URL alone is insufficient
+// — server re-derives sig from `${order}:${p}:${exp}` and only the customer
+// (who has their own phone) can produce a matching value via /liff-url regen.
 export async function buildLiffBindUrl(
   orderId: string,
+  phoneLast4: string,
   env: AppEnv,
 ): Promise<LiffBindUrlParts> {
   const exp = Math.floor(Date.now() / 1000) + SIG_TTL_SECONDS;
-  const sig = await hmacSha256(env.LIFF_BIND_HMAC_SECRET, `${orderId}:${exp}`);
+  const sig = await hmacSha256(
+    env.LIFF_BIND_HMAC_SECRET,
+    `${orderId}:${phoneLast4}:${exp}`,
+  );
   const liffId = env.LINE_LIFF_ID;
-  const url = `https://liff.line.me/${liffId}?order=${encodeURIComponent(orderId)}&exp=${exp}&sig=${sig}`;
+  const url = `https://liff.line.me/${liffId}?order=${encodeURIComponent(orderId)}&p=${phoneLast4}&exp=${exp}&sig=${sig}`;
   return { url, exp, sig };
 }
 
@@ -59,13 +70,18 @@ export type SigVerifyResult =
 
 export async function verifyLiffBindSig(
   orderId: string,
+  phoneLast4: string,
   exp: number,
   sig: string,
   env: AppEnv,
 ): Promise<SigVerifyResult> {
   if (!Number.isFinite(exp) || exp <= 0) return { ok: false, reason: "invalid" };
   if (Math.floor(Date.now() / 1000) > exp) return { ok: false, reason: "expired" };
-  const expected = await hmacSha256(env.LIFF_BIND_HMAC_SECRET, `${orderId}:${exp}`);
+  if (!/^\d{4}$/.test(phoneLast4)) return { ok: false, reason: "invalid" };
+  const expected = await hmacSha256(
+    env.LIFF_BIND_HMAC_SECRET,
+    `${orderId}:${phoneLast4}:${exp}`,
+  );
   return constantTimeEqual(sig, expected) ? { ok: true } : { ok: false, reason: "invalid" };
 }
 

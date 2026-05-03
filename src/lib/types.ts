@@ -1,4 +1,7 @@
-export type Sku = "DRY-JH-1" | "DRY-JH-05" | "DRY-AW-1" | "DRY-AW-05";
+// V2: SKUs are user-defined via the admin product CRUD (D1 `text("sku")`),
+// so the literal union no longer matches reality. Kept as a named alias for
+// readability rather than spreading bare `string` through the public API.
+export type Sku = string;
 
 export interface Product {
   sku: Sku;
@@ -77,7 +80,7 @@ export interface OrderStatusSuccess {
 
 export interface OrderStatusError {
   ok: false;
-  error_code: "NOT_FOUND" | "INVALID_INPUT" | "INTERNAL";
+  error_code: "NOT_FOUND" | "INVALID_INPUT" | "INTERNAL" | "LOCKED";
 }
 
 export type OrderStatusResponse = OrderStatusSuccess | OrderStatusError;
