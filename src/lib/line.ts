@@ -106,6 +106,7 @@ export async function pushShippedNotification(
   env: AppEnv,
   db: Db,
   order: Order,
+  origin: string,
 ): Promise<PushResult> {
   if (!order.line_user_id) return { ok: false, error: "no_line_user_id" };
   if (!env.LINE_OA_TOKEN) {
@@ -134,10 +135,11 @@ export async function pushShippedNotification(
   const trackingLine = order.tracking_no
     ? `物流單號：${order.tracking_no}`
     : "物流單號：將在出貨後補登";
+  const statusUrl = `${origin.replace(/\/$/, "")}/status?id=${order.order_id}`;
   const text = [
     `📦 您的訂單 ${order.order_id} 已出貨`,
     trackingLine,
-    `查詢進度：https://mango-hsu.rayclaw-worker.workers.dev/status?id=${order.order_id}`,
+    `查詢進度：${statusUrl}`,
     "",
     "感謝您支持小農，期待芒果收到時的笑容 🥭",
   ].join("\n");

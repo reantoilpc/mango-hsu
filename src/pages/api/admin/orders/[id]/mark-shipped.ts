@@ -46,7 +46,8 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
   const fresh = await db.select().from(orders).where(eq(orders.order_id, id)).limit(1);
   const order = fresh[0];
   if (order && order.line_user_id && !order.line_push_sent_at) {
-    ctx?.waitUntil(pushShippedNotification(env, db, order));
+    const origin = new URL(request.url).origin;
+    ctx?.waitUntil(pushShippedNotification(env, db, order, origin));
   }
 
   return json({ ok: true });

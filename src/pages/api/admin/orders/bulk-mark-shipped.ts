@@ -39,9 +39,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     .select()
     .from(orders)
     .where(inArray(orders.order_id, ids));
+  const origin = new URL(request.url).origin;
   for (const order of updated) {
     if (order.shipped && order.line_user_id && !order.line_push_sent_at) {
-      ctx?.waitUntil(pushShippedNotification(env, db, order));
+      ctx?.waitUntil(pushShippedNotification(env, db, order, origin));
     }
   }
 
