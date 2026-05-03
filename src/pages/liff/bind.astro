@@ -1,0 +1,232 @@
+---
+import "../../styles/global.css";
+import { env } from "../../lib/env";
+
+const liffId = env.LINE_LIFF_ID || "";
+const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
+---
+
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>綁定出貨通知 · 芒果許</title>
+  </head>
+  <body class="bg-mango-50 text-mango-900 min-h-screen">
+    <main class="max-w-md mx-auto px-5 py-8">
+      <div class="text-center mb-6">
+        <span class="text-5xl">🥭</span>
+        <h1 class="text-xl font-bold mt-2">芒果許 出貨通知綁定</h1>
+      </div>
+
+      <div id="state-loading" class="bg-white rounded-xl border border-mango-200 p-6 text-center text-sm text-mango-700">
+        正在連線 LINE...
+      </div>
+
+      <div id="state-error-init" class="hidden bg-white rounded-xl border border-red-300 p-6 space-y-3">
+        <p class="font-semibold text-red-700">綁定服務暫時無法使用</p>
+        <p class="text-sm text-mango-700" id="error-init-detail">LIFF 初始化失敗。</p>
+        <p class="text-sm text-mango-700">
+          可以稍後再試，或從訂單頁面查詢進度：
+        </p>
+        <a id="link-status-fallback" class="block text-center bg-mango-500 text-white font-semibold rounded-lg px-4 py-2" href="#">
+          查詢訂單狀態
+        </a>
+      </div>
+
+      <div id="state-bad-sig" class="hidden bg-white rounded-xl border border-red-300 p-6 space-y-3">
+        <p class="font-semibold text-red-700">連結已過期或無效</p>
+        <p class="text-sm text-mango-700">
+          綁定連結 30 分鐘有效。請從訂單頁面重新進入綁定流程。
+        </p>
+        <a id="link-regen" class="block text-center bg-mango-500 text-white font-semibold rounded-lg px-4 py-2" href="#">
+          回到訂單頁
+        </a>
+      </div>
+
+      <div id="state-need-friend" class="hidden bg-white rounded-xl border border-mango-200 p-6 space-y-3">
+        <p class="font-semibold">最後一步 — 加芒果許為 LINE 好友</p>
+        <p class="text-sm text-mango-700">
+          加好友後，出貨時你會在 LINE 收到通知。
+        </p>
+        <a id="add-friend-btn" class="block text-center bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg px-4 py-3" href={addFriendUrl} target="_blank" rel="noopener">
+          加為 LINE 好友
+        </a>
+        <button id="recheck-btn" class="block w-full text-center bg-mango-500 hover:bg-mango-600 text-white font-semibold rounded-lg px-4 py-3">
+          我加好了，繼續綁定
+        </button>
+        <p class="text-xs text-mango-700 pt-2 text-center" id="recheck-hint"></p>
+      </div>
+
+      <div id="state-binding" class="hidden bg-white rounded-xl border border-mango-200 p-6 text-center text-sm text-mango-700">
+        綁定中...
+      </div>
+
+      <div id="state-success" class="hidden bg-white rounded-xl border border-green-300 p-6 space-y-3 text-center">
+        <p class="text-3xl">✅</p>
+        <p class="font-semibold text-lg">綁定成功</p>
+        <p class="text-sm text-mango-700">
+          家人按下「已出貨」時，你會在 LINE 收到出貨通知與物流單號。
+        </p>
+        <button id="close-btn" class="bg-mango-500 hover:bg-mango-600 text-white font-semibold rounded-lg px-4 py-2">
+          完成
+        </button>
+      </div>
+
+      <div id="state-error-bind" class="hidden bg-white rounded-xl border border-red-300 p-6 space-y-3">
+        <p class="font-semibold text-red-700">綁定失敗</p>
+        <p class="text-sm text-mango-700" id="error-bind-detail"></p>
+      </div>
+    </main>
+
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" is:inline></script>
+
+    <script define:vars={{ liffId }} is:inline>
+      (async function () {
+        const params = new URLSearchParams(window.location.search);
+        const orderId = params.get("order") || "";
+        const exp = parseInt(params.get("exp") || "0", 10);
+        const sig = params.get("sig") || "";
+
+        const $ = (id) => document.getElementById(id);
+        const show = (id) => {
+          [
+            "state-loading",
+            "state-error-init",
+            "state-bad-sig",
+            "state-need-friend",
+            "state-binding",
+            "state-success",
+            "state-error-bind",
+          ].forEach((s) => $(s)?.classList.add("hidden"));
+          $(id)?.classList.remove("hidden");
+        };
+
+        $("link-status-fallback").href = orderId ? `/status?id=${encodeURIComponent(orderId)}` : "/status";
+        $("link-regen").href = orderId ? `/status?id=${encodeURIComponent(orderId)}` : "/order";
+
+        if (!orderId || !exp || !sig) {
+          $("error-init-detail").textContent = "連結參數缺失，請從訂單頁重新進入。";
+          show("state-error-init");
+          return;
+        }
+
+        if (Math.floor(Date.now() / 1000) > exp) {
+          show("state-bad-sig");
+          return;
+        }
+
+        if (!liffId) {
+          $("error-init-detail").textContent = "服務未設定 LIFF ID，請通知家人。";
+          show("state-error-init");
+          return;
+        }
+
+        if (typeof window.liff === "undefined") {
+          $("error-init-detail").textContent = "LIFF SDK 載入失敗，請檢查網路後重試。";
+          show("state-error-init");
+          return;
+        }
+
+        try {
+          await window.liff.init({ liffId });
+        } catch (err) {
+          $("error-init-detail").textContent = "LIFF 初始化失敗：" + (err && err.message ? err.message : err);
+          show("state-error-init");
+          return;
+        }
+
+        if (!window.liff.isLoggedIn()) {
+          window.liff.login({ redirectUri: window.location.href });
+          return;
+        }
+
+        let profile;
+        try {
+          profile = await window.liff.getProfile();
+        } catch (err) {
+          $("error-init-detail").textContent = "無法讀取 LINE 個人資料。";
+          show("state-error-init");
+          return;
+        }
+
+        async function getFriendshipSafe() {
+          try {
+            const r = await window.liff.getFriendship();
+            return r && r.friendFlag === true;
+          } catch {
+            return false;
+          }
+        }
+
+        async function performBind() {
+          show("state-binding");
+          let res;
+          try {
+            res = await fetch("/api/liff/bind", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                order_id: orderId,
+                exp: exp,
+                sig: sig,
+                line_user_id: profile.userId,
+              }),
+            });
+          } catch (err) {
+            $("error-bind-detail").textContent = "網路錯誤，請稍後再試。";
+            show("state-error-bind");
+            return;
+          }
+          let body = {};
+          try { body = await res.json(); } catch {}
+          if (res.ok && body.ok) {
+            show("state-success");
+            return;
+          }
+          if (res.status === 409) {
+            $("error-bind-detail").textContent = "這張訂單已綁定其他 LINE 帳號。如有疑問請聯絡家人處理。";
+          } else if (body.error === "expired") {
+            show("state-bad-sig");
+            return;
+          } else {
+            $("error-bind-detail").textContent = "綁定失敗（" + (body.error || res.status) + "），請從訂單頁重試。";
+          }
+          show("state-error-bind");
+        }
+
+        $("close-btn")?.addEventListener("click", () => {
+          if (window.liff && window.liff.closeWindow) {
+            try { window.liff.closeWindow(); return; } catch {}
+          }
+          window.location.href = `/status?id=${encodeURIComponent(orderId)}`;
+        });
+
+        const recheckBtn = $("recheck-btn");
+        const recheckHint = $("recheck-hint");
+        recheckBtn.addEventListener("click", async () => {
+          recheckBtn.disabled = true;
+          for (let i = 0; i < 3; i++) {
+            recheckHint.textContent = `檢查中（${i + 1}/3）...`;
+            const ok = await getFriendshipSafe();
+            if (ok) {
+              await performBind();
+              return;
+            }
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+          recheckHint.textContent = "LINE 狀態還在更新中，先記錄你的綁定。";
+          await performBind();
+        });
+
+        const isFriend = await getFriendshipSafe();
+        if (isFriend) {
+          await performBind();
+        } else {
+          show("state-need-friend");
+        }
+      })();
+    </script>
+  </body>
+</html>

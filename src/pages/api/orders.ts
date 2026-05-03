@@ -119,7 +119,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
       .select()
       .from(order_items)
       .where(eq(order_items.order_id, prior[0]!.order_id));
-    return json(assembleOrderSuccess(prior[0]!, items, env));
+    return json(await assembleOrderSuccess(prior[0]!, items, env));
   }
 
   // 2) Season check
@@ -200,7 +200,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
       }));
       ctx?.waitUntil(notifyOrder(env, db, fullOrder, itemsForTelegram));
 
-      return json(assembleOrderSuccess(fullOrder, fullItems, env));
+      return json(await assembleOrderSuccess(fullOrder, fullItems, env));
     } catch (err) {
       if (isUniqueOnIdempotency(err)) {
         // Race-of-race: another request just inserted the same idempotency key.
@@ -214,7 +214,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
           .select()
           .from(order_items)
           .where(eq(order_items.order_id, existing[0].order_id));
-        return json(assembleOrderSuccess(existing[0], items, env));
+        return json(await assembleOrderSuccess(existing[0], items, env));
       }
       if (isUniqueOnOrderId(err)) {
         // Two concurrent requests computed the same nextOrderId. Retry.

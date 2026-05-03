@@ -15,6 +15,10 @@ export type AppEnv = {
   ORDER_TOKEN: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
+  LINE_OA_TOKEN: string;
+  LINE_LIFF_ID: string;
+  LINE_OA_ADD_FRIEND_URL: string;
+  LIFF_BIND_HMAC_SECRET: string;
   // Static assets binding (Astro Cloudflare adapter)
   ASSETS: Fetcher;
 };

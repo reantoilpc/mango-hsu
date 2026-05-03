@@ -45,6 +45,8 @@ export interface OrderSuccess {
   bank_account_display: string;
   eta_days_after_payment: number;
   status_url: string;
+  liff_bind_url: string | null;
+  phone_last4: string;
 }
 
 export type OrderErrorCode =

@@ -45,10 +45,13 @@ export const orders = sqliteTable(
     paid_by: text("paid_by").references(() => admin_users.email),
     shipped_by: text("shipped_by").references(() => admin_users.email),
     idempotency_key: text("idempotency_key").notNull().unique(),
+    line_user_id: text("line_user_id"),
+    line_push_sent_at: text("line_push_sent_at"),
   },
   (t) => ({
     byCreated: index("orders_by_created").on(t.created_at),
     byPaidShipped: index("orders_by_paid_shipped").on(t.paid, t.shipped),
+    byLineUserId: index("orders_by_line_user_id").on(t.line_user_id),
   }),
 );
 

@@ -1,5 +1,6 @@
 import type { AppEnv } from "../db/client";
 import type { Order, OrderItem, Product } from "../db/schema";
+import { buildLiffBindUrl } from "./line";
 
 export interface OrderSuccess {
   ok: true;
@@ -11,6 +12,8 @@ export interface OrderSuccess {
   bank_account_display: string;
   eta_days_after_payment: number;
   status_url: string;
+  liff_bind_url: string | null;
+  phone_last4: string;
 }
 
 export type OrderErrorCode =
@@ -47,11 +50,20 @@ export function statusUrlFor(orderId: string): string {
   return `/status?id=${encodeURIComponent(orderId)}`;
 }
 
-export function assembleOrderSuccess(
+export async function assembleOrderSuccess(
   order: Order,
   _items: OrderItem[],
   env: AppEnv,
-): OrderSuccess {
+): Promise<OrderSuccess> {
+  let liffBindUrl: string | null = null;
+  if (env.LINE_LIFF_ID && env.LIFF_BIND_HMAC_SECRET) {
+    try {
+      const parts = await buildLiffBindUrl(order.order_id, env);
+      liffBindUrl = parts.url;
+    } catch {
+      liffBindUrl = null;
+    }
+  }
   return {
     ok: true,
     order_id: order.order_id,
@@ -62,5 +74,7 @@ export function assembleOrderSuccess(
     bank_account_display: env.BANK_ACCOUNT_DISPLAY,
     eta_days_after_payment: parseInt(env.ETA_DAYS_AFTER_PAYMENT, 10) || 5,
     status_url: statusUrlFor(order.order_id),
+    liff_bind_url: liffBindUrl,
+    phone_last4: order.phone.slice(-4),
   };
 }

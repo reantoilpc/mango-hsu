@@ -226,6 +226,39 @@ const shipFee = settings.shipping_fee_twd;
               </div>
             </div>
 
+            <div
+              id="line-bind-section"
+              class="hidden bg-white rounded-xl border border-mango-200 p-6 text-sm space-y-3"
+            >
+              <p class="font-semibold">📱 出貨後想收 LINE 通知？</p>
+              <p class="text-mango-700">
+                加芒果許 LINE 為好友並綁定這張訂單，出貨時你會在 LINE
+                收到物流單號。
+              </p>
+              <a
+                id="line-bind-btn"
+                class="block text-center bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg px-4 py-3"
+                href="#"
+              >
+                用 LINE 加好友 + 綁訂單
+              </a>
+              <div id="line-bind-qr-block" class="hidden text-center pt-2 space-y-2">
+                <p class="text-xs text-mango-700">
+                  在桌機嗎？拿手機掃下面 QR Code 用 LINE App 開：
+                </p>
+                <img
+                  id="line-bind-qr"
+                  alt="LINE 綁定 QR"
+                  class="mx-auto rounded border border-mango-200"
+                  width="180"
+                  height="180"
+                />
+              </div>
+              <p class="text-xs text-mango-700 pt-1">
+                不想收 LINE 通知？沒關係，你也可以從訂單狀態頁查進度。
+              </p>
+            </div>
+
             <div class="bg-white rounded-xl border border-mango-200 p-6 text-sm space-y-2">
               <p>
                 📦 收到款項後 <span id="c-eta"></span> 個工作天內出貨。
@@ -373,6 +406,21 @@ const shipFee = settings.shipping_fee_twd;
       (document.getElementById("c-memo") as HTMLElement).textContent = res.expected_memo;
       (document.getElementById("c-eta") as HTMLElement).textContent = String(res.eta_days_after_payment);
       (document.getElementById("c-status-link") as HTMLAnchorElement).href = res.status_url;
+
+      // LINE bind section
+      if (res.liff_bind_url) {
+        const lineSection = document.getElementById("line-bind-section") as HTMLElement;
+        const lineBtn = document.getElementById("line-bind-btn") as HTMLAnchorElement;
+        const qrBlock = document.getElementById("line-bind-qr-block") as HTMLElement;
+        const qrImg = document.getElementById("line-bind-qr") as HTMLImageElement;
+        lineSection.classList.remove("hidden");
+        lineBtn.href = res.liff_bind_url;
+        const inLineApp = /Line\//.test(navigator.userAgent);
+        if (!inLineApp) {
+          qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(res.liff_bind_url)}`;
+          qrBlock.classList.remove("hidden");
+        }
+      }
 
       const copyBtn = document.getElementById("copy-memo-btn") as HTMLButtonElement;
       copyBtn.addEventListener("click", async () => {

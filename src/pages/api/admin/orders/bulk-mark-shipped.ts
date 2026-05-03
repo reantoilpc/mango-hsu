@@ -1,10 +1,12 @@
 import type { APIRoute } from "astro";
+import { inArray } from "drizzle-orm";
+import { makeDb } from "../../../../db/client";
+import { orders } from "../../../../db/schema";
 import { authorizeAdmin, json, text } from "../../../../lib/admin-api";
 import { env } from "../../../../lib/env";
+import { pushShippedNotification } from "../../../../lib/line";
 
 export const POST: APIRoute = async ({ request, locals }) => {
-
-
   const auth = await authorizeAdmin(request, env);
   if (!auth.ok) return text(auth.reason, auth.status);
 
@@ -29,6 +31,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
       `INSERT INTO audit_log (ts, user_email, action, details) VALUES (?, ?, 'bulk_mark_shipped', ?)`,
     ).bind(now, auth.session.email, JSON.stringify({ count: ids.length, ids })),
   ]);
+
+  // Fire-and-forget LINE pushes for any in this batch with a bound LINE user.
+  const ctx = locals.cfContext;
+  const db = makeDb(env);
+  const updated = await db
+    .select()
+    .from(orders)
+    .where(inArray(orders.order_id, ids));
+  for (const order of updated) {
+    if (order.shipped && order.line_user_id && !order.line_push_sent_at) {
+      ctx?.waitUntil(pushShippedNotification(env, db, order));
+    }
+  }
 
   return json({ ok: true, processed: ids.length });
 };

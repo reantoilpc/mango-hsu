@@ -1,11 +1,12 @@
 import type { APIRoute } from "astro";
+import { eq } from "drizzle-orm";
 import { makeDb } from "../../../../../db/client";
+import { orders } from "../../../../../db/schema";
 import { authorizeAdmin, json, text } from "../../../../../lib/admin-api";
 import { env } from "../../../../../lib/env";
+import { pushShippedNotification } from "../../../../../lib/line";
 
 export const POST: APIRoute = async ({ request, params, locals }) => {
-
-
   const auth = await authorizeAdmin(request, env);
   if (!auth.ok) return text(auth.reason, auth.status);
 
@@ -38,5 +39,15 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
 
   const changes = result[0]?.meta?.changes ?? 0;
   if (changes === 0) return text("not_changed (unpaid? already shipped?)", 409);
+
+  // Fire-and-forget LINE push if customer bound a LINE user and we haven't pushed yet.
+  const ctx = locals.cfContext;
+  const db = makeDb(env);
+  const fresh = await db.select().from(orders).where(eq(orders.order_id, id)).limit(1);
+  const order = fresh[0];
+  if (order && order.line_user_id && !order.line_push_sent_at) {
+    ctx?.waitUntil(pushShippedNotification(env, db, order));
+  }
+
   return json({ ok: true });
 };
