@@ -214,10 +214,18 @@ const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
         }
 
         $("close-btn")?.addEventListener("click", () => {
-          if (window.liff && window.liff.closeWindow) {
-            try { window.liff.closeWindow(); return; } catch {}
+          let closed = false;
+          try {
+            if (window.liff && typeof window.liff.isInClient === "function" && window.liff.isInClient()) {
+              window.liff.closeWindow();
+              closed = true;
+            }
+          } catch {}
+          if (!closed) {
+            window.location.href = orderId
+              ? `/status?id=${encodeURIComponent(orderId)}`
+              : "/status";
           }
-          window.location.href = `/status?id=${encodeURIComponent(orderId)}`;
         });
 
         const recheckBtn = $("recheck-btn");
