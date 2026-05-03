@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Pre-commit hook: scan staged content for token / key shaped strings.
+# Bypass (only when truly necessary): `git commit --no-verify`
+#
+# One-time setup per clone:
+#   git config core.hooksPath .githooks
+#
+# Install gitleaks: `brew install gitleaks` (macOS) or see https://github.com/gitleaks/gitleaks
+set -e
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "✘ gitleaks not installed. Skipping secret scan."
+  echo "  Install: brew install gitleaks"
+  echo "  Bypass once: git commit --no-verify"
+  exit 1
+fi
+
+# `gitleaks protect --staged` scans only what's staged for this commit.
+gitleaks protect --staged --no-banner --redact
+status=$?
+
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "✘ gitleaks blocked this commit — a secret-shaped string was detected."
+  echo "  Review the finding above. If it's a real secret:"
+  echo "    1. Remove it from the staged change"
+  echo "    2. Rotate the secret (treat it as already leaked)"
+  echo "  If it's a false positive, add a rule to .gitleaks.toml or use:"
+  echo "    git commit --no-verify  (use sparingly!)"
+  exit 1
+fi
+
+exit 0
