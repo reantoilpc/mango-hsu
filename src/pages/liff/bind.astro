@@ -84,10 +84,27 @@ const addFriendUrl = env.LINE_OA_ADD_FRIEND_URL || "";
 
     <script define:vars={{ liffId }} is:inline>
       (async function () {
-        const params = new URLSearchParams(window.location.search);
-        const orderId = params.get("order") || "";
-        const exp = parseInt(params.get("exp") || "0", 10);
-        const sig = params.get("sig") || "";
+        // LINE LIFF wraps the original querystring inside `liff.state` (URL-encoded)
+        // when redirecting from liff.line.me/<LIFF_ID>?order=... to the endpoint URL.
+        // So we read direct params first, fall back to liff.state if missing.
+        function readParams() {
+          const direct = new URLSearchParams(window.location.search);
+          let order = direct.get("order");
+          let exp = direct.get("exp");
+          let sig = direct.get("sig");
+          if (!order) {
+            const liffState = direct.get("liff.state");
+            if (liffState) {
+              const stateStr = liffState.startsWith("?") ? liffState.slice(1) : liffState;
+              const stateParams = new URLSearchParams(stateStr);
+              order = stateParams.get("order");
+              exp = stateParams.get("exp");
+              sig = stateParams.get("sig");
+            }
+          }
+          return { order: order || "", exp: parseInt(exp || "0", 10), sig: sig || "" };
+        }
+        const { order: orderId, exp, sig } = readParams();
 
         const $ = (id) => document.getElementById(id);
         const show = (id) => {
