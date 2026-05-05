@@ -33,7 +33,7 @@ const productRows = await db
 
     <ul class="mb-8 divide-y divide-gray-200 rounded border border-gray-200">
       {productRows.map((p) => (
-        <li class="px-4 py-3">
+        <li class="px-4 py-3 space-y-2">
           <form
             class="prod-form grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem]"
             data-sku={p.sku}
@@ -83,6 +83,38 @@ const productRows = await db
               儲存
             </button>
           </form>
+
+          {/* V4: stock adjust panel */}
+          <details class="stock-adjust rounded border border-mango-200 bg-mango-50 px-3 py-2 text-sm" data-sku={p.sku} data-current-stock={p.stock}>
+            <summary class="cursor-pointer text-mango-800">
+              庫存 <span class="font-semibold">{p.stock}</span> 包 ・ 調整
+            </summary>
+            <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[5rem_1fr_5rem]">
+              <input
+                type="number"
+                name="new_stock"
+                min="0"
+                max="9999"
+                value={p.stock}
+                class="rounded border border-gray-300 px-2 py-1 text-sm"
+                placeholder="新庫存"
+              />
+              <input
+                type="text"
+                name="reason"
+                maxlength="200"
+                class="rounded border border-gray-300 px-2 py-1 text-sm"
+                placeholder="原因（補貨 / 校正 / 壞貨報廢...）"
+              />
+              <button
+                type="button"
+                class="stock-save-btn rounded bg-mango-600 px-3 py-1 text-sm text-white hover:bg-mango-700 disabled:bg-mango-300"
+              >
+                儲存
+              </button>
+              <div class="stock-error hidden col-span-1 sm:col-span-3 text-xs text-red-700"></div>
+            </div>
+          </details>
         </li>
       ))}
       {productRows.length === 0 && (
@@ -168,6 +200,89 @@ const productRows = await db
       });
       if (res.ok) location.reload();
       else alert("新增失敗：" + (await res.text()));
+    });
+
+    // V4: stock adjust per-row. Two-step: first attempt without override.
+    // If server returns STOCK_BELOW_UNSHIPPED, confirm with the user, then
+    // resubmit with override_unshipped=true.
+    document.querySelectorAll<HTMLDetailsElement>(".stock-adjust").forEach((panel) => {
+      const sku = panel.dataset.sku!;
+      const newStockInput = panel.querySelector<HTMLInputElement>('input[name="new_stock"]')!;
+      const reasonInput = panel.querySelector<HTMLInputElement>('input[name="reason"]')!;
+      const saveBtn = panel.querySelector<HTMLButtonElement>(".stock-save-btn")!;
+      const errEl = panel.querySelector<HTMLElement>(".stock-error")!;
+
+      function showErr(msg: string) {
+        errEl.textContent = msg;
+        errEl.classList.remove("hidden");
+      }
+      function clearErr() {
+        errEl.textContent = "";
+        errEl.classList.add("hidden");
+      }
+
+      async function submit(override: boolean): Promise<void> {
+        const new_stock = Number(newStockInput.value);
+        const reason = reasonInput.value.trim();
+        if (!Number.isInteger(new_stock) || new_stock < 0 || new_stock > 9999) {
+          showErr("新庫存須為 0-9999 整數");
+          return;
+        }
+        if (reason.length === 0) {
+          showErr("請填調整原因");
+          return;
+        }
+        saveBtn.disabled = true;
+        const original = saveBtn.textContent;
+        saveBtn.textContent = "儲存中...";
+        try {
+          const res = await fetch(`/api/admin/products/${encodeURIComponent(sku)}/stock`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ new_stock, reason, override_unshipped: override }),
+          });
+          const data = (await res.json().catch(() => ({}))) as {
+            ok?: boolean;
+            error_code?: string;
+            message?: string;
+            unshipped_total?: number;
+            current_stock?: number;
+          };
+          if (res.ok && data.ok) {
+            location.reload();
+            return;
+          }
+          if (data.error_code === "STOCK_BELOW_UNSHIPPED" && !override) {
+            const u = data.unshipped_total;
+            const c = data.current_stock;
+            if (
+              confirm(
+                `未出貨單共 ${u} 包，新庫存 ${new_stock} 比這還少（目前 ${c} 包）。確定？\n` +
+                  `這通常表示你接受庫存資料跟未出貨承諾不一致——audit_log 會留紀錄。`,
+              )
+            ) {
+              await submit(true);
+              return;
+            }
+            saveBtn.disabled = false;
+            saveBtn.textContent = original;
+            return;
+          }
+          showErr(`儲存失敗：${data.message ?? data.error_code ?? res.status}`);
+          saveBtn.disabled = false;
+          saveBtn.textContent = original;
+        } catch (e) {
+          showErr("網路錯誤，請稍後再試。");
+          saveBtn.disabled = false;
+          saveBtn.textContent = original;
+        }
+      }
+
+      saveBtn.addEventListener("click", async () => {
+        clearErr();
+        await submit(false);
+      });
     });
   </script>
 </Layout>
