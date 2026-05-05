@@ -58,6 +58,7 @@ export const GET: APIRoute = async ({ params, request, url, clientAddress }) => 
       shipped: orders.shipped,
       tracking_no: orders.tracking_no,
       created_at: orders.created_at,
+      cancelled_at: orders.cancelled_at,
     })
     .from(orders)
     .where(eq(orders.order_id, id))
@@ -66,6 +67,13 @@ export const GET: APIRoute = async ({ params, request, url, clientAddress }) => 
   if (rows.length === 0) return json({ ok: false, error_code: "NOT_FOUND" });
   const o = rows[0]!;
   if (o.phone.slice(-4) !== phoneLast4) {
+    return json({ ok: false, error_code: "NOT_FOUND" });
+  }
+  // V4: cancelled orders return NOT_FOUND to mirror non-existence — avoids
+  // leaking "your order was cancelled" details to a customer who may simply
+  // be trying random IDs. Real cancellation context is communicated by the
+  // family directly (LINE, phone) outside this endpoint.
+  if (o.cancelled_at !== null) {
     return json({ ok: false, error_code: "NOT_FOUND" });
   }
 

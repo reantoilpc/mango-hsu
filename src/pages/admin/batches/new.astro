@@ -2,8 +2,9 @@
 import Layout from "../../../layouts/Layout.astro";
 import { makeDb } from "../../../db/client";
 import { orders, order_items, products } from "../../../db/schema";
-import { inArray } from "drizzle-orm";
+import { inArray, and } from "drizzle-orm";
 import { aggregateSkuTotals, formatTaipei } from "../../../lib/formatters";
+import { activeOrdersFilter } from "../../../lib/orders-query";
 import { env } from "../../../lib/env";
 
 
@@ -24,10 +25,13 @@ if (ids.length === 0) {
 
 const db = makeDb(env);
 
+// V4 critical regression fix: cancelled orders MUST NOT appear on the
+// picking sheet — that's exactly the "stock-double-billed" bug V4
+// fixes. Filter is non-optional here.
 const orderRows = await db
   .select()
   .from(orders)
-  .where(inArray(orders.order_id, ids));
+  .where(and(inArray(orders.order_id, ids), activeOrdersFilter));
 
 const itemRows = await db
   .select()

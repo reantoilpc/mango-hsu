@@ -23,9 +23,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const now = new Date().toISOString();
   const placeholders = ids.map(() => "?").join(", ");
 
+  // V4: cancelled_at IS NULL guards against bulk-shipping a cancelled
+  // order (whose stock has been restored). Single statement keeps the
+  // existing paid=1 AND shipped=0 invariant for partial-success behavior.
   await env.DB.batch([
     env.DB.prepare(
-      `UPDATE orders SET shipped = 1, shipped_at = ?, shipped_by = ? WHERE paid = 1 AND shipped = 0 AND order_id IN (${placeholders})`,
+      `UPDATE orders SET shipped = 1, shipped_at = ?, shipped_by = ? WHERE paid = 1 AND shipped = 0 AND cancelled_at IS NULL AND order_id IN (${placeholders})`,
     ).bind(now, auth.session.email, ...ids),
     env.DB.prepare(
       `INSERT INTO audit_log (ts, user_email, action, details) VALUES (?, ?, 'bulk_mark_shipped', ?)`,

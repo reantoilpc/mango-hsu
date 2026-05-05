@@ -3,6 +3,7 @@ import Layout from "../../layouts/Layout.astro";
 import { makeDb } from "../../db/client";
 import { orders } from "../../db/schema";
 import { sql, desc, eq, and } from "drizzle-orm";
+import { activeOrdersFilter } from "../../lib/orders-query";
 import { env } from "../../lib/env";
 
 
@@ -12,22 +13,28 @@ if (!session) return Astro.redirect("/admin/login");
 
 const db = makeDb(env);
 
-const totalRow = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM orders`);
+// V4: COUNT/SELECT exclude cancelled (soft-deleted) orders so the dashboard
+// reflects "active business," not history. Cancelled orders are still queryable
+// from /admin/orders/[id] and /admin/orders?filter=cancelled.
+const totalRow = await db.all<{ n: number }>(
+  sql`SELECT COUNT(*) AS n FROM orders WHERE cancelled_at IS NULL`,
+);
 const total = totalRow[0]?.n ?? 0;
 
 const pendingPaidRow = await db.all<{ n: number }>(
-  sql`SELECT COUNT(*) AS n FROM orders WHERE paid = 0`,
+  sql`SELECT COUNT(*) AS n FROM orders WHERE paid = 0 AND cancelled_at IS NULL`,
 );
 const pendingPaid = pendingPaidRow[0]?.n ?? 0;
 
 const pendingShipRow = await db.all<{ n: number }>(
-  sql`SELECT COUNT(*) AS n FROM orders WHERE paid = 1 AND shipped = 0`,
+  sql`SELECT COUNT(*) AS n FROM orders WHERE paid = 1 AND shipped = 0 AND cancelled_at IS NULL`,
 );
 const pendingShip = pendingShipRow[0]?.n ?? 0;
 
 const recent = await db
   .select()
   .from(orders)
+  .where(activeOrdersFilter)
   .orderBy(desc(orders.created_at))
   .limit(5);
 ---

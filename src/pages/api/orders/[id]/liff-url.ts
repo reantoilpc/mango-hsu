@@ -29,7 +29,11 @@ export const GET: APIRoute = async ({ params, request, url, clientAddress }) => 
 
   const db = makeDb(env);
   const rows = await db
-    .select({ order_id: orders.order_id, phone: orders.phone })
+    .select({
+      order_id: orders.order_id,
+      phone: orders.phone,
+      cancelled_at: orders.cancelled_at,
+    })
     .from(orders)
     .where(eq(orders.order_id, id))
     .limit(1);
@@ -38,6 +42,10 @@ export const GET: APIRoute = async ({ params, request, url, clientAddress }) => 
 
   if (order.phone.slice(-4) !== phoneLast4) {
     return json({ ok: false, error: "phone_mismatch" }, 403);
+  }
+  // V4: cancelled orders cannot acquire a fresh LIFF bind URL.
+  if (order.cancelled_at !== null) {
+    return json({ ok: false, error: "not_found" }, 404);
   }
 
   const parts = await buildLiffBindUrl(order.order_id, phoneLast4, env);

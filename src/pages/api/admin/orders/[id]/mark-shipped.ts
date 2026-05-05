@@ -22,10 +22,12 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
   const trackingNo = (body.tracking_no ?? "").trim();
   if (trackingNo.length > 100) return text("tracking too long", 400);
 
+  // V4: cancelled_at IS NULL guards against marking a cancelled order shipped
+  // (whose stock has been restored).
   const now = new Date().toISOString();
   const result = await env.DB.batch([
     env.DB.prepare(
-      "UPDATE orders SET shipped = 1, shipped_at = ?, shipped_by = ?, tracking_no = ? WHERE order_id = ? AND paid = 1 AND shipped = 0",
+      "UPDATE orders SET shipped = 1, shipped_at = ?, shipped_by = ?, tracking_no = ? WHERE order_id = ? AND paid = 1 AND shipped = 0 AND cancelled_at IS NULL",
     ).bind(now, auth.session.email, trackingNo || null, id),
     env.DB.prepare(
       "INSERT INTO audit_log (ts, user_email, action, order_id, details) VALUES (?, ?, 'mark_shipped', ?, ?)",
@@ -38,7 +40,7 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
   ]);
 
   const changes = result[0]?.meta?.changes ?? 0;
-  if (changes === 0) return text("not_changed (unpaid? already shipped?)", 409);
+  if (changes === 0) return text("not_changed (unpaid? already shipped? cancelled?)", 409);
 
   // Fire-and-forget LINE push if customer bound a LINE user and we haven't pushed yet.
   const ctx = locals.cfContext;
