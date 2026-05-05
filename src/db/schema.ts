@@ -10,6 +10,9 @@ export const products = sqliteTable("products", {
   variant: text("variant").notNull(),
   price: integer("price").notNull(), // TWD, integer
   available: integer("available", { mode: "boolean" }).notNull().default(true),
+  // V4: integer stock count. atomic decrement via SQL UPDATE ... WHERE stock >= qty.
+  // available=false hides SKU regardless of stock; available=true && stock=0 = "售完".
+  stock: integer("stock").notNull().default(0),
   display_order: integer("display_order").notNull().default(0),
 });
 
@@ -47,6 +50,10 @@ export const orders = sqliteTable(
     idempotency_key: text("idempotency_key").notNull().unique(),
     line_user_id: text("line_user_id"),
     line_push_sent_at: text("line_push_sent_at"),
+    // V4: soft-delete cancel. NULL = active; ISO timestamp = cancelled.
+    // PDPA cron purge ignores this flag (uses created_at only).
+    // Who cancelled is recorded via audit_log (action='order_cancelled').
+    cancelled_at: text("cancelled_at"),
   },
   (t) => ({
     byCreated: index("orders_by_created").on(t.created_at),
