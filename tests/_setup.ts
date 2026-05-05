@@ -31,10 +31,10 @@ if (!STAGE_URL || !TEST_TOKEN) {
   );
 }
 
-export function d1Execute(sql: string): string {
+export function d1Execute(sql: string): unknown[] {
   const r = spawnSync(
     "wrangler",
-    ["d1", "execute", D1_DATABASE, "--remote", "--command", sql],
+    ["d1", "execute", D1_DATABASE, "--remote", "--json", "--command", sql],
     { encoding: "utf-8" },
   );
   if (r.status !== 0) {
@@ -42,7 +42,42 @@ export function d1Execute(sql: string): string {
       `wrangler d1 execute failed (exit ${r.status}):\n${r.stderr}\n${r.stdout}`,
     );
   }
-  return r.stdout;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch {
+    throw new Error(`wrangler d1 execute returned non-JSON:\n${r.stdout}`);
+  }
+  const arr = parsed as Array<{ success: boolean; results: unknown[]; error?: string }>;
+  if (!arr[0]?.success) {
+    throw new Error(`d1 query failed: ${arr[0]?.error ?? JSON.stringify(arr[0])}`);
+  }
+  return arr[0].results;
+}
+
+// Stage rate-limit (KV-backed, 3 req / 60s per IP) trips on test traffic
+// faster than the 60s TTL clears. Wipe `rl:order:*` keys before order-posting
+// tests so each scenario starts clean.
+export function clearOrderRateLimit() {
+  const list = spawnSync(
+    "wrangler",
+    ["kv", "key", "list", "--binding=RATELIMIT", "--env=stage", "--remote", "--prefix=rl:order:"],
+    { encoding: "utf-8" },
+  );
+  if (list.status !== 0) return;
+  let keys: Array<{ name: string }>;
+  try {
+    keys = JSON.parse(list.stdout);
+  } catch {
+    return;
+  }
+  for (const { name } of keys) {
+    spawnSync(
+      "wrangler",
+      ["kv", "key", "delete", name, "--binding=RATELIMIT", "--env=stage", "--remote"],
+      { encoding: "utf-8" },
+    );
+  }
 }
 
 // Test data uses a `test-` prefix on SKUs and customer names so cleanup
@@ -71,14 +106,11 @@ export function setSkuStock(sku: string, stock: number) {
 }
 
 export function getSkuStock(sku: string): number {
-  const out = d1Execute(`SELECT stock FROM products WHERE sku = '${sku}'`);
-  // wrangler d1 execute --remote returns formatted ASCII table; parse the stock column
-  // by finding the first numeric value after a newline. Fragile but family-scale OK.
-  const match = out.match(/(\d+)/g);
-  if (!match || match.length === 0) {
-    throw new Error(`getSkuStock("${sku}"): no number in output:\n${out}`);
+  const rows = d1Execute(`SELECT stock FROM products WHERE sku = '${sku}'`) as Array<{ stock: number }>;
+  if (rows.length === 0) {
+    throw new Error(`getSkuStock("${sku}"): no rows`);
   }
-  return Number(match[match.length - 1]);
+  return rows[0].stock;
 }
 
 export function cleanupTestData() {
@@ -88,6 +120,7 @@ export function cleanupTestData() {
     `DELETE FROM orders WHERE name LIKE '${TEST_NAME_PREFIX}%' OR idempotency_key LIKE '${TEST_NAME_PREFIX}%'`,
   );
   d1Execute(`DELETE FROM products WHERE sku LIKE '${TEST_SKU_PREFIX}%'`);
+  clearOrderRateLimit();
 }
 
 // Simple wrapper for fetching the stage worker. Tests pass headers / body etc.
