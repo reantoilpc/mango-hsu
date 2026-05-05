@@ -12,6 +12,7 @@ import {
 } from "../../lib/order-response";
 import { validateCustomerOrder } from "../../lib/order-validate";
 import { isUniqueOnIdempotency, isUniqueOnOrderId } from "../../lib/order-errors";
+import { tryDecrementStock, restoreStock } from "../../lib/stock";
 import { notifyOrder } from "../../lib/telegram";
 import { env } from "../../lib/env";
 
@@ -102,6 +103,14 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   const shipping = shippingFor(body.items, env);
   const total = subtotal + shipping;
 
+  // 3.5) Atomic stock reserve (BEFORE the order_id retry loop — exactly once
+  // regardless of order_id collisions). On idempotency_key race we restore;
+  // on order_id collision we KEEP the reservation across retries.
+  const reserve = await tryDecrementStock(env, body.items);
+  if (!reserve.ok) {
+    return json({ ok: false, error_code: "SOLD_OUT", sold_out_sku: reserve.sold_out_sku });
+  }
+
   // 4) Insert with race-aware order_id retry (max 3 attempts).
   for (let attempt = 0; attempt < 3; attempt++) {
     const orderId = await nextOrderId(db);
@@ -161,7 +170,10 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
       return json(await assembleOrderSuccess(fullOrder, fullItems, env));
     } catch (err) {
       if (isUniqueOnIdempotency(err)) {
-        // Race-of-race: another request just inserted the same idempotency key.
+        // Race-of-race: another request just inserted with the same idempotency key.
+        // Their reservation already covered the stock; ours must be returned BEFORE
+        // the replay select, so any select error doesn't leave dangling stock.
+        await restoreStock(env, body.items);
         const existing = await db
           .select()
           .from(orders)
@@ -175,11 +187,14 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
         return json(await assembleOrderSuccess(existing[0], items, env));
       }
       if (isUniqueOnOrderId(err)) {
-        // Two concurrent requests computed the same nextOrderId. Retry.
+        // Two concurrent requests computed the same nextOrderId. Retry —
+        // do NOT restore stock; we hold the reservation across the retry
+        // because the next insert reuses the same items[].
         await new Promise((r) => setTimeout(r, 50));
         continue;
       }
-      // Unknown error
+      // Unknown error — restore reservation, then bail.
+      await restoreStock(env, body.items);
       try {
         await db.insert(audit_log).values({
           ts: new Date().toISOString(),
@@ -197,6 +212,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     }
   }
 
-  // exhausted retries
+  // Exhausted retries — restore reservation before returning.
+  await restoreStock(env, body.items);
   return json({ ok: false, error_code: "LOCKED" });
 };
