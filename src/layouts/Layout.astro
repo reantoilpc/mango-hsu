@@ -10,6 +10,12 @@ const {
   title = "芒果許",
   description = "自家栽種、自家加工的金煌與愛文芒果乾。產季限量供應。",
 } = Astro.props;
+
+// Admin context: logged-in admin pages get admin nav (訂單/商品/變更紀錄/變更密碼);
+// /admin/login stays on customer nav since no session yet.
+const pathname = Astro.url.pathname;
+const session = (Astro.locals as { session?: { email: string; role: string } }).session;
+const isAdminShell = pathname.startsWith("/admin") && !!session;
 ---
 
 <!doctype html>
@@ -40,11 +46,20 @@ const {
           <span class="text-2xl">🥭</span>
           <span>芒果許</span>
         </a>
-        <nav class="flex gap-1 text-sm">
-          <a href="/products" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">產品</a>
-          <a href="/order" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">下訂</a>
-          <a href="/status" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">查詢</a>
-        </nav>
+        {isAdminShell ? (
+          <nav class="flex gap-1 text-sm">
+            <a href="/admin/orders" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">訂單</a>
+            <a href="/admin/products" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">商品</a>
+            <a href="/admin/audit" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更紀錄</a>
+            <a href="/admin/change-password" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更密碼</a>
+          </nav>
+        ) : (
+          <nav class="flex gap-1 text-sm">
+            <a href="/products" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">產品</a>
+            <a href="/order" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">下訂</a>
+            <a href="/status" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">查詢</a>
+          </nav>
+        )}
       </div>
     </header>
 
