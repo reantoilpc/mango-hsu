@@ -1,0 +1,4 @@
+# V4: bun test configuration. Loaded automatically by `bun test`.
+# `preload` runs once before the suite — used to verify env / seed / cleanup.
+[test]
+preload = ["./tests/_setup.ts"]
