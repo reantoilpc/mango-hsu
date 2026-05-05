@@ -39,6 +39,7 @@ const auditRows = await db
   .limit(50);
 
 const isAdmin = session.role === "admin";
+const cancellable = !order.paid && !order.shipped && order.cancelled_at === null;
 ---
 
 <Layout>
@@ -49,6 +50,11 @@ const isAdmin = session.role === "admin";
         <h1 class="mt-1 text-2xl font-bold">{order.order_id}</h1>
       </div>
       <div class="flex gap-1">
+        {order.cancelled_at !== null && (
+          <span class="rounded px-2 py-0.5 text-xs bg-red-100 text-red-700">
+            已取消
+          </span>
+        )}
         <span
           class:list={[
             "rounded px-2 py-0.5 text-xs",
@@ -71,6 +77,11 @@ const isAdmin = session.role === "admin";
         </span>
       </div>
     </header>
+    {order.cancelled_at !== null && (
+      <div class="mb-6 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
+        此訂單已於 {formatTaipei(order.cancelled_at)} 取消。庫存已歸還、不會出貨。
+      </div>
+    )}
 
     <section class="mb-6 rounded border border-gray-200 p-4">
       <h2 class="mb-3 text-lg font-bold">客人資訊</h2>
@@ -196,13 +207,25 @@ const isAdmin = session.role === "admin";
                 >
                   儲存
                 </button>
-                <button
-                  type="button"
-                  id="cancel-order"
-                  class="rounded border border-red-400 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
-                >
-                  取消訂單
-                </button>
+                {cancellable ? (
+                  <button
+                    type="button"
+                    id="cancel-order"
+                    class="rounded border border-red-400 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+                  >
+                    取消訂單
+                  </button>
+                ) : (
+                  <span class="text-xs text-gray-500" title="已付款或已出貨的單不可在這裡取消">
+                    {order.cancelled_at !== null
+                      ? "已取消"
+                      : order.shipped
+                        ? "已出貨無法取消"
+                        : order.paid
+                          ? "已付款（需走退款流程）"
+                          : "—"}
+                  </span>
+                )}
               </div>
             </form>
           </details>
