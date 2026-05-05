@@ -4,7 +4,9 @@ import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
 
 const settings = await loadSiteSettings(env);
-const available = settings.products.filter((p) => p.available);
+// V4: only show items the customer can actually buy — admin keeping it on the
+// menu (available) AND there's stock left.
+const sellable = settings.products.filter((p) => p.available && p.stock > 0);
 const freeShipMin = settings.free_shipping_min_packages;
 const shipFee = settings.shipping_fee_twd;
 ---
@@ -19,7 +21,7 @@ const shipFee = settings.shipping_fee_twd;
             產季結束了，謝謝大家。下一季開賣時我們會在首頁公告。
           </p>
         </div>
-      ) : available.length === 0 ? (
+      ) : sellable.length === 0 ? (
         <div class="text-center py-10">
           <h1 class="text-2xl font-bold mb-2">今年全部售完</h1>
           <p class="text-mango-700">感謝支持！下一季見。</p>
@@ -88,7 +90,7 @@ const shipFee = settings.shipping_fee_twd;
                 訂購品項 <span class="text-red-500">*</span>
               </p>
               <div class="space-y-3">
-                {available.map((p) => (
+                {sellable.map((p) => (
                   <div class="flex items-center gap-3 border border-mango-200 rounded-lg px-3 py-2 bg-white">
                     <div class="flex-1">
                       <p class="font-medium text-sm">
@@ -102,7 +104,7 @@ const shipFee = settings.shipping_fee_twd;
                       data-sku={p.sku}
                       data-price={p.price}
                       min="0"
-                      max="99"
+                      max={Math.min(99, p.stock)}
                       value="0"
                       class="item-qty w-20 border border-mango-300 rounded px-2 py-1 text-center focus:border-mango-500 outline-none"
                     />

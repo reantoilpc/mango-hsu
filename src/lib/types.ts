@@ -9,6 +9,9 @@ export interface Product {
   variant: string;
   price: number;
   available: boolean;
+  // V4: stock count. available=false hides regardless;
+  // available=true && stock=0 shows as 售完 灰化.
+  stock: number;
 }
 
 export interface SiteSettings {

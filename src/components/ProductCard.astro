@@ -6,12 +6,15 @@ interface Props {
 }
 
 const { product } = Astro.props;
+// V4: sellable means admin keeps it on the menu AND there's actual stock left.
+// Either condition false → show 已售完 + 灰化.
+const sellable = product.available && product.stock > 0;
 ---
 
 <article
   class:list={[
     "border rounded-xl p-5 transition bg-white/70",
-    product.available
+    sellable
       ? "border-mango-200 hover:border-mango-500"
       : "border-mango-100 opacity-60",
   ]}
@@ -21,7 +24,7 @@ const { product } = Astro.props;
       {product.name}
     </h3>
     {
-      product.available ? (
+      sellable ? (
         <span class="text-xs font-medium bg-mango-500 text-white px-2 py-1 rounded-full">
           接單中
         </span>
