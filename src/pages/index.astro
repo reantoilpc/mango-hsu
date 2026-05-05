@@ -4,7 +4,19 @@ import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
 
 const settings = await loadSiteSettings(env);
+// Three states drive what the hero shows:
+//   season closed (!accepting)            → 暫停接單
+//   accepting + no sellable stock          → 本季售完
+//   accepting + has stock                  → 接單中 (happy path)
+// The middle state existed before but was undetected — pill said 接單中 while
+// /order rendered 今年全部售完, sending users to a dead end.
 const accepting = settings.accepting_dry;
+const hasStock = settings.products.some((p) => p.available && p.stock > 0);
+const orderState: "closed" | "soldout" | "open" = !accepting
+  ? "closed"
+  : hasStock
+    ? "open"
+    : "soldout";
 ---
 
 <Layout title="芒果許 — 自產自消芒果">
@@ -13,7 +25,7 @@ const accepting = settings.accepting_dry;
       <span
         class:list={[
           "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full",
-          accepting
+          orderState === "open"
             ? "bg-mango-500 text-white"
             : "bg-mango-100 text-mango-700",
         ]}
@@ -21,10 +33,14 @@ const accepting = settings.accepting_dry;
         <span
           class:list={[
             "w-1.5 h-1.5 rounded-full",
-            accepting ? "bg-white" : "bg-mango-700",
+            orderState === "open" ? "bg-white" : "bg-mango-700",
           ]}
         ></span>
-        {accepting ? "本季接單中" : "目前暫停接單，下一季見"}
+        {orderState === "open"
+          ? "本季接單中"
+          : orderState === "soldout"
+            ? "今年全部售完，下一季見"
+            : "目前暫停接單，下一季見"}
       </span>
 
       <h1 class="text-4xl md:text-5xl font-bold leading-tight mt-2">
@@ -38,7 +54,7 @@ const accepting = settings.accepting_dry;
       </p>
 
       {
-        accepting && (
+        orderState === "open" && (
           <div class="flex flex-wrap gap-3 pt-4">
             <a
               href="/order"
@@ -57,7 +73,20 @@ const accepting = settings.accepting_dry;
       }
 
       {
-        !accepting && (
+        orderState === "soldout" && (
+          <div class="flex flex-wrap gap-3 pt-4">
+            <a
+              href="/products"
+              class="border border-mango-300 hover:border-mango-500 text-mango-700 font-semibold px-6 py-3 rounded-lg transition"
+            >
+              看產品介紹
+            </a>
+          </div>
+        )
+      }
+
+      {
+        orderState !== "open" && (
           <p class="text-sm text-mango-700 pt-2">
             想要知道下一季開賣消息，直接私訊我們的 LINE{" "}
             <span class="font-mono">{settings.support_line_id}</span>
