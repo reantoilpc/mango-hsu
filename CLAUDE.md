@@ -36,7 +36,7 @@ Astro 6 SSR on Cloudflare Workers + D1/Drizzle + KV + Tailwind v4. Two workers: 
 - `bun test` runs all tests; `bun test:watch` for dev mode.
 - Pure units (`tests/stock-helper.test.ts`) need no env.
 - Integration tests (`tests/stock-d1.test.ts`, `tests/admin-idempotency.test.ts`, `tests/regression-cancelled-orders.test.ts`) hit the **stage** worker over HTTP and use `wrangler d1 execute --remote` to seed/cleanup. They require:
-  - `MANGO_STAGE_URL=https://mango-hsu-stage.workers.dev` env var
+  - `MANGO_STAGE_URL=https://mango-hsu-stage.rayclaw-worker.workers.dev` env var
   - `TEST_TOKEN=<stage ORDER_TOKEN>` env var (NEVER use prod's)
   - `wrangler login` completed (or `CLOUDFLARE_API_TOKEN`)
 - Test data uses `test-` prefix on SKUs / customer names — `cleanupTestData()` only deletes those rows.
