@@ -29,9 +29,20 @@ const productRows = await db
 
     <p class="mb-4 text-sm text-gray-600">
       下架某商品就把「上架」取消勾選；不要刪 SKU（會破壞舊訂單品項關聯）。
+      <br />
+      「順序」= 商品在客人頁的排列順序（數字小的先），<strong>不是庫存</strong>。庫存在每列下方「庫存 X 包 ・ 調整」面板調整。
     </p>
 
     <ul class="mb-8 divide-y divide-gray-200 rounded border border-gray-200">
+      <li class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem] items-center gap-2 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
+        <div>SKU</div>
+        <div>名稱</div>
+        <div>規格</div>
+        <div>價格</div>
+        <div>順序</div>
+        <div class="text-center">上架</div>
+        <div></div>
+      </li>
       {productRows.map((p) => (
         <li class="px-4 py-3 space-y-2">
           <form
@@ -44,6 +55,7 @@ const productRows = await db
               name="name"
               value={p.name}
               required
+              aria-label="名稱"
               class="rounded border border-gray-300 px-2 py-1.5 text-sm"
               placeholder="名稱"
             />
@@ -52,6 +64,7 @@ const productRows = await db
               name="variant"
               value={p.variant}
               required
+              aria-label="規格"
               class="rounded border border-gray-300 px-2 py-1.5 text-sm"
               placeholder="規格"
             />
@@ -61,6 +74,7 @@ const productRows = await db
               value={p.price}
               required
               min="0"
+              aria-label="價格"
               class="rounded border border-gray-300 px-2 py-1.5 text-sm"
               placeholder="價格"
             />
@@ -69,6 +83,7 @@ const productRows = await db
               name="display_order"
               value={p.display_order}
               required
+              aria-label="順序（顯示排序，非庫存）"
               class="rounded border border-gray-300 px-2 py-1.5 text-sm"
               placeholder="順序"
             />
@@ -124,6 +139,15 @@ const productRows = await db
 
     <section class="rounded border border-amber-200 bg-amber-50 p-4">
       <h2 class="mb-3 text-lg font-bold">新增商品</h2>
+      <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem] items-center gap-2 mb-1 px-1 text-xs font-medium text-amber-800">
+        <div>SKU</div>
+        <div>名稱</div>
+        <div>規格</div>
+        <div>價格</div>
+        <div>順序</div>
+        <div class="text-center">上架</div>
+        <div></div>
+      </div>
       <form
         id="create-form"
         class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem]"
@@ -133,13 +157,14 @@ const productRows = await db
           name="sku"
           required
           pattern="[A-Z0-9_-]+"
+          aria-label="SKU"
           class="rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
           placeholder="SKU"
         />
-        <input type="text" name="name" required class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="名稱" />
-        <input type="text" name="variant" required class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="規格" />
-        <input type="number" name="price" required min="0" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="價格" />
-        <input type="number" name="display_order" required value="0" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="順序" />
+        <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="名稱" />
+        <input type="text" name="variant" required aria-label="規格" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="規格" />
+        <input type="number" name="price" required min="0" aria-label="價格" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="價格" />
+        <input type="number" name="display_order" required value="0" aria-label="順序（顯示排序，非庫存）" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="順序" />
         <label class="flex items-center justify-center gap-1 text-sm">
           <input type="checkbox" name="available" checked />
           <span>上架</span>
