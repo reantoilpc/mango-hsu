@@ -3,7 +3,7 @@ import cloudflare from '@astrojs/cloudflare';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  site: 'https://mango-hsu.rayclaw-worker.workers.dev',
+  site: 'https://mango-hsu.rhsu.workers.dev',
   output: 'server',
   adapter: cloudflare({
     platformProxy: {

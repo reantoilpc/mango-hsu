@@ -59,6 +59,11 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
     .limit(1);
   const order = found[0];
   if (!order) return json({ ok: false, error: "order_not_found" }, 404);
+  // V4: cancelled orders cannot be LIFF-bound. Treat as not-found from the
+  // customer's perspective — the family communicates cancellations directly.
+  if (order.cancelled_at !== null) {
+    return json({ ok: false, error: "order_not_found" }, 404);
+  }
 
   const now = new Date().toISOString();
 

@@ -39,6 +39,22 @@ const auditRows = await db
   .limit(50);
 
 const isAdmin = session.role === "admin";
+const cancellable = !order.paid && !order.shipped && order.cancelled_at === null;
+// V4: same gate as cancel — only edit items when the order is still pre-payment.
+const itemsEditable = cancellable;
+// Sellable products available for "+新增品項" — all available with stock > 0,
+// PLUS any already-on-the-order product (so a SKU now stock=0 is still
+// editable down to qty=0 / remove).
+const skusOnOrder = new Set(items.map((i) => i.sku));
+const sellableForNew = productRows
+  .filter((p) => p.available && (p.stock > 0 || skusOnOrder.has(p.sku)))
+  .map((p) => ({
+    sku: p.sku,
+    name: p.name,
+    variant: p.variant,
+    price: p.price,
+    stock: p.stock,
+  }));
 ---
 
 <Layout>
@@ -49,6 +65,11 @@ const isAdmin = session.role === "admin";
         <h1 class="mt-1 text-2xl font-bold">{order.order_id}</h1>
       </div>
       <div class="flex gap-1">
+        {order.cancelled_at !== null && (
+          <span class="rounded px-2 py-0.5 text-xs bg-red-100 text-red-700">
+            已取消
+          </span>
+        )}
         <span
           class:list={[
             "rounded px-2 py-0.5 text-xs",
@@ -63,7 +84,7 @@ const isAdmin = session.role === "admin";
           class:list={[
             "rounded px-2 py-0.5 text-xs",
             order.shipped
-              ? "bg-blue-100 text-blue-700"
+              ? "bg-orange-100 text-orange-700"
               : "bg-gray-100 text-gray-700",
           ]}
         >
@@ -71,6 +92,11 @@ const isAdmin = session.role === "admin";
         </span>
       </div>
     </header>
+    {order.cancelled_at !== null && (
+      <div class="mb-6 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
+        此訂單已於 {formatTaipei(order.cancelled_at)} 取消。庫存已歸還、不會出貨。
+      </div>
+    )}
 
     <section class="mb-6 rounded border border-gray-200 p-4">
       <h2 class="mb-3 text-lg font-bold">客人資訊</h2>
@@ -129,6 +155,65 @@ const isAdmin = session.role === "admin";
       <p class="mt-3 text-sm text-gray-500">
         轉帳備註：<code class="font-mono">{order.expected_memo}</code>
       </p>
+
+      {isAdmin && itemsEditable && (
+        <details class="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm">
+          <summary class="cursor-pointer font-medium text-amber-800">
+            admin: 編輯品項
+          </summary>
+          <div
+            id="items-editor"
+            class="mt-3 space-y-3"
+            data-order-id={order.order_id}
+            data-initial-items={JSON.stringify(items.map((i) => ({ sku: i.sku, qty: i.qty })))}
+            data-products={JSON.stringify(sellableForNew)}
+          >
+            <table class="w-full text-sm">
+              <thead class="text-left text-xs text-gray-500">
+                <tr>
+                  <th class="pb-1">品項</th>
+                  <th class="pb-1 text-right">單價</th>
+                  <th class="pb-1 text-right">數量</th>
+                  <th class="pb-1"></th>
+                </tr>
+              </thead>
+              <tbody id="items-rows"></tbody>
+            </table>
+            <div class="flex flex-wrap items-center gap-2">
+              <select
+                id="add-sku-select"
+                class="rounded border border-gray-300 px-2 py-1 text-sm"
+              >
+                <option value="">+ 新增品項...</option>
+              </select>
+              <button
+                type="button"
+                id="add-sku-btn"
+                class="rounded border border-amber-400 bg-white px-3 py-1 text-sm text-amber-700 hover:bg-amber-100"
+              >
+                加入
+              </button>
+            </div>
+            <div class="flex justify-between border-t border-amber-200 pt-2 text-sm">
+              <span class="text-gray-600">調整後總計</span>
+              <span id="items-total" class="font-medium">$0</span>
+            </div>
+            <div
+              id="items-error"
+              class="hidden rounded bg-red-50 border border-red-200 px-2 py-1 text-xs text-red-700"
+            ></div>
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                id="items-save"
+                class="rounded bg-amber-600 px-4 py-1.5 text-sm text-white hover:bg-amber-700 disabled:bg-amber-300 disabled:cursor-not-allowed"
+              >
+                儲存品項變更
+              </button>
+            </div>
+          </div>
+        </details>
+      )}
     </section>
 
     <section class="mb-6 rounded border border-gray-200 p-4">
@@ -196,13 +281,25 @@ const isAdmin = session.role === "admin";
                 >
                   儲存
                 </button>
-                <button
-                  type="button"
-                  id="cancel-order"
-                  class="rounded border border-red-400 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
-                >
-                  取消訂單
-                </button>
+                {cancellable ? (
+                  <button
+                    type="button"
+                    id="cancel-order"
+                    class="rounded border border-red-400 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+                  >
+                    取消訂單
+                  </button>
+                ) : (
+                  <span class="text-xs text-gray-500" title="已付款或已出貨的單不可在這裡取消">
+                    {order.cancelled_at !== null
+                      ? "已取消"
+                      : order.shipped
+                        ? "已出貨無法取消"
+                        : order.paid
+                          ? "已付款（需走退款流程）"
+                          : "—"}
+                  </span>
+                )}
               </div>
             </form>
           </details>
@@ -284,5 +381,151 @@ const isAdmin = session.role === "admin";
           location.href = "/admin/orders";
         }
       });
+
+    // V4: item-edit local-state UI. Maintains a working copy of items[]
+    // and mutates it from button clicks; only fires PATCH on Save.
+    (function setupItemsEditor() {
+      const root = document.getElementById("items-editor");
+      if (!root) return;
+      const initial = JSON.parse(root.dataset.initialItems);
+      const products = JSON.parse(root.dataset.products);
+      const productMap = new Map(products.map((p) => [p.sku, p]));
+      const rowsEl = document.getElementById("items-rows");
+      const totalEl = document.getElementById("items-total");
+      const selectEl = document.getElementById("add-sku-select");
+      const addBtn = document.getElementById("add-sku-btn");
+      const saveBtn = document.getElementById("items-save");
+      const errEl = document.getElementById("items-error");
+
+      // Working state — mutated locally until save.
+      let working = initial.slice();
+
+      function renderSelect() {
+        const onOrder = new Set(working.map((i) => i.sku));
+        selectEl.innerHTML = '<option value="">+ 新增品項...</option>';
+        for (const p of products) {
+          if (onOrder.has(p.sku)) continue;
+          const opt = document.createElement("option");
+          opt.value = p.sku;
+          opt.textContent = `${p.name} ${p.variant} ($${p.price}, 剩 ${p.stock})`;
+          selectEl.appendChild(opt);
+        }
+      }
+
+      function renderRows() {
+        rowsEl.innerHTML = "";
+        let total = 0;
+        for (const item of working) {
+          const p = productMap.get(item.sku);
+          const tr = document.createElement("tr");
+          const max = p ? Math.min(99, Math.max(p.stock + (initial.find((x) => x.sku === item.sku)?.qty ?? 0), item.qty)) : 99;
+          tr.innerHTML = `
+            <td class="py-1">${p ? p.name + " " + p.variant : item.sku}</td>
+            <td class="py-1 text-right">$${p ? p.price : "?"}</td>
+            <td class="py-1 text-right">
+              <input
+                type="number"
+                min="1"
+                max="${max}"
+                value="${item.qty}"
+                data-sku="${item.sku}"
+                class="qty-input w-16 rounded border border-gray-300 px-2 py-0.5 text-right"
+              />
+            </td>
+            <td class="py-1 text-right">
+              <button
+                type="button"
+                data-remove-sku="${item.sku}"
+                class="rounded border border-red-300 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50"
+                title="移除此品項"
+              >
+                ✕
+              </button>
+            </td>
+          `;
+          rowsEl.appendChild(tr);
+          total += (p ? p.price : 0) * item.qty;
+        }
+        totalEl.textContent = "$" + total;
+
+        // Wire qty change + remove buttons
+        rowsEl.querySelectorAll(".qty-input").forEach((el) => {
+          el.addEventListener("input", (e) => {
+            const sku = e.target.dataset.sku;
+            const qty = Math.max(1, Math.floor(Number(e.target.value) || 1));
+            const it = working.find((x) => x.sku === sku);
+            if (it) it.qty = qty;
+            // recompute total without re-rendering inputs (to keep cursor)
+            let t = 0;
+            for (const w of working) {
+              const pp = productMap.get(w.sku);
+              t += (pp ? pp.price : 0) * w.qty;
+            }
+            totalEl.textContent = "$" + t;
+          });
+        });
+        rowsEl.querySelectorAll("[data-remove-sku]").forEach((el) => {
+          el.addEventListener("click", (e) => {
+            const sku = e.target.dataset.removeSku;
+            working = working.filter((x) => x.sku !== sku);
+            renderSelect();
+            renderRows();
+          });
+        });
+      }
+
+      addBtn.addEventListener("click", () => {
+        const sku = selectEl.value;
+        if (!sku) return;
+        if (working.some((x) => x.sku === sku)) return;
+        working.push({ sku, qty: 1 });
+        renderSelect();
+        renderRows();
+      });
+
+      function showError(msg) {
+        errEl.textContent = msg;
+        errEl.classList.remove("hidden");
+      }
+      function clearError() {
+        errEl.textContent = "";
+        errEl.classList.add("hidden");
+      }
+
+      saveBtn.addEventListener("click", async () => {
+        clearError();
+        if (working.length === 0) {
+          showError("至少要保留一個品項。");
+          return;
+        }
+        saveBtn.disabled = true;
+        saveBtn.textContent = "儲存中...";
+        try {
+          const res = await fetch(`/api/admin/orders/${orderId}/items`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ items: working }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.ok === false) {
+            const code = data.error_code || res.status;
+            const sku = data.sold_out_sku ? ` (${data.sold_out_sku})` : "";
+            showError(`儲存失敗：${code}${sku}`);
+            saveBtn.disabled = false;
+            saveBtn.textContent = "儲存品項變更";
+            return;
+          }
+          location.reload();
+        } catch (err) {
+          showError("網路錯誤，請稍後再試。");
+          saveBtn.disabled = false;
+          saveBtn.textContent = "儲存品項變更";
+        }
+      });
+
+      renderSelect();
+      renderRows();
+    })();
   </script>
 </Layout>

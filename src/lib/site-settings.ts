@@ -14,6 +14,7 @@ export interface SiteSettings {
     variant: string;
     price: number;
     available: boolean;
+    stock: number;
   }>;
   shipping_fee_twd: number;
   free_shipping_min_packages: number;
@@ -37,6 +38,7 @@ export async function loadSiteSettings(env: AppEnv): Promise<SiteSettings> {
       variant: p.variant,
       price: p.price,
       available: p.available,
+      stock: p.stock,
     })),
     shipping_fee_twd: parseInt(env.SHIPPING_FEE_TWD, 10) || 80,
     free_shipping_min_packages: parseInt(env.FREE_SHIPPING_MIN_PACKAGES, 10) || 10,

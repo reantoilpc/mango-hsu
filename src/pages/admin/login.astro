@@ -59,7 +59,7 @@ if (Astro.request.method === "POST") {
         action: "login_rate_limited_email",
       });
     } else if (!email || !password) {
-      errorMessage = "請輸入 email 跟密碼。";
+      errorMessage = "請輸入電子信箱跟密碼。";
     } else {
       const rows = await db
         .select()
@@ -95,7 +95,7 @@ if (Astro.request.method === "POST") {
         user_email: email || "<unknown>",
         action: "login_fail",
       });
-      errorMessage = "Email 或密碼錯誤。";
+      errorMessage = "電子信箱或密碼錯誤。";
     }
   }
 }
@@ -111,7 +111,7 @@ if (Astro.request.method === "POST") {
     )}
     <form method="POST" class="space-y-4">
       <div>
-        <label for="email" class="block text-sm font-medium mb-1">Email</label>
+        <label for="email" class="block text-sm font-medium mb-1">電子信箱</label>
         <input
           id="email"
           name="email"

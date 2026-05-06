@@ -31,3 +31,13 @@ Astro 6 SSR on Cloudflare Workers + D1/Drizzle + KV + Tailwind v4. Two workers: 
 **Conventions:** Order IDs `M-YYYYMMDD-NNN` use **Asia/Taipei** calendar; other timestamps are **UTC ISO-8601 + Z**. `audit_log.user_email` intentionally not an FK (history survives admin deletion); `audit_log.order_id` is FK-cascaded for PDPA purge.
 
 **Notifications (`src/lib/line.ts`):** Telegram new-order push, LINE status push (monthly cap 200), LIFF bind HMAC URL.
+
+## Testing
+- `bun test` runs all tests; `bun test:watch` for dev mode.
+- Pure units (`tests/stock-helper.test.ts`) need no env.
+- Integration tests (`tests/stock-d1.test.ts`, `tests/admin-idempotency.test.ts`, `tests/regression-cancelled-orders.test.ts`) hit the **stage** worker over HTTP and use `wrangler d1 execute --remote` to seed/cleanup. They require:
+  - `MANGO_STAGE_URL=https://mango-hsu-stage.rhsu.workers.dev` env var
+  - `TEST_TOKEN=<stage ORDER_TOKEN>` env var (NEVER use prod's)
+  - `wrangler login` completed (or `CLOUDFLARE_API_TOKEN`)
+- Test data uses `test-` prefix on SKUs / customer names — `cleanupTestData()` only deletes those rows.
+- See `tests/_setup.ts` for helpers (`seedSku`, `getSkuStock`, `createTestAdminSession`, `cleanupTestData`).

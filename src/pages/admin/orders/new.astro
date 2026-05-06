@@ -1,0 +1,239 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { asc } from "drizzle-orm";
+import { makeDb } from "../../../db/client";
+import { products } from "../../../db/schema";
+import { env } from "../../../lib/env";
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+
+const db = makeDb(env);
+// Show all SKUs the admin keeps on the menu — including stock=0 ones —
+// disabled-but-visible. Admin sees what's gone vs invisible-and-confusing.
+const productRows = await db
+  .select()
+  .from(products)
+  .where(undefined)
+  .orderBy(asc(products.display_order));
+const sellableProducts = productRows.filter((p) => p.available);
+
+// V4 idempotency: render-time UUID protects against double-click submit.
+// Same key on two requests → second request's idempotency precheck replays
+// the first order, no double stock decrement. Wife is on her phone, network
+// might be flaky, this is the right place for the safety net.
+const idempotencyKey = crypto.randomUUID();
+---
+
+<Layout>
+  <main class="mx-auto max-w-2xl px-4 py-6">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">代客建單</h1>
+      <a href="/admin/orders" class="text-sm text-gray-600 underline">← 訂單列表</a>
+    </header>
+
+    <p class="mb-4 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-gray-700">
+      用來把姑姑那邊 LINE 接到的訂單灌進系統。客人看不到這個頁面，<br />
+      不會送 Telegram、不會推 LINE 通知。庫存照樣會扣。
+    </p>
+
+    {sellableProducts.length === 0 ? (
+      <div class="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-3 text-sm">
+        目前沒有上架中的商品，請先到 <a href="/admin/products" class="underline">商品管理</a> 設定。
+      </div>
+    ) : (
+      <form id="admin-order-form" class="space-y-5" novalidate>
+        <input type="hidden" name="idempotency_key" value={idempotencyKey} />
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="name">
+            收件人 <span class="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            required
+            maxlength="50"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          />
+        </div>
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="phone">
+            手機（09 開頭 10 碼）<span class="text-red-500">*</span>
+          </label>
+          <input
+            type="tel"
+            id="phone"
+            name="phone"
+            required
+            pattern="09[0-9]{8}"
+            inputmode="numeric"
+            maxlength="10"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          />
+        </div>
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="address">
+            收件地址 <span class="text-red-500">*</span>
+          </label>
+          <textarea
+            id="address"
+            name="address"
+            required
+            rows="2"
+            maxlength="200"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          ></textarea>
+        </div>
+
+        <div>
+          <p class="mb-2 block text-sm font-medium">
+            訂購品項 <span class="text-red-500">*</span>
+          </p>
+          <div class="space-y-3">
+            {sellableProducts.map((p) => (
+              <div class:list={[
+                "flex items-center gap-3 rounded-lg border bg-white px-3 py-2",
+                p.stock <= 0 ? "border-gray-200 opacity-60" : "border-mango-200",
+              ]}>
+                <div class="flex-1">
+                  <p class="text-sm font-medium">
+                    {p.name} · {p.variant}
+                  </p>
+                  <p class="text-xs text-gray-600">
+                    ${p.price} / 包 · 剩 {p.stock} 包{p.stock <= 0 && " · 已售完"}
+                  </p>
+                </div>
+                <input
+                  type="number"
+                  name={`qty_${p.sku}`}
+                  data-sku={p.sku}
+                  min="0"
+                  max={Math.min(99, Math.max(p.stock, 0))}
+                  value="0"
+                  disabled={p.stock <= 0}
+                  class="item-qty w-20 rounded border border-gray-300 px-2 py-1 text-center outline-none focus:border-mango-500 disabled:bg-gray-100"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="notes">
+            備註（選填）
+          </label>
+          <textarea
+            id="notes"
+            name="notes"
+            rows="2"
+            maxlength="200"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          ></textarea>
+        </div>
+
+        <div id="form-error" class="hidden rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700"></div>
+
+        <button
+          type="submit"
+          id="submit-btn"
+          class="w-full rounded-lg bg-mango-500 px-6 py-3 font-semibold text-white transition hover:bg-mango-600 disabled:cursor-not-allowed disabled:bg-mango-300"
+        >
+          建立訂單
+        </button>
+      </form>
+    )}
+  </main>
+</Layout>
+
+<script>
+  const form = document.getElementById("admin-order-form") as HTMLFormElement | null;
+  if (form) {
+    const submitBtn = document.getElementById("submit-btn") as HTMLButtonElement;
+    const errEl = document.getElementById("form-error") as HTMLElement;
+    const qtyInputs = form.querySelectorAll<HTMLInputElement>(".item-qty");
+
+    function showError(msg: string) {
+      errEl.textContent = msg;
+      errEl.classList.remove("hidden");
+    }
+    function clearError() {
+      errEl.textContent = "";
+      errEl.classList.add("hidden");
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearError();
+      if (!form.reportValidity()) return;
+
+      const items: Array<{ sku: string; qty: number }> = [];
+      qtyInputs.forEach((el) => {
+        const qty = Math.max(0, Math.floor(Number(el.value) || 0));
+        if (qty > 0 && el.dataset.sku) {
+          items.push({ sku: el.dataset.sku, qty });
+        }
+      });
+      if (items.length === 0) {
+        showError("請至少選購一項。");
+        return;
+      }
+
+      const idempotencyKey = (form.elements.namedItem("idempotency_key") as HTMLInputElement).value;
+      const name = (form.elements.namedItem("name") as HTMLInputElement).value.trim();
+      const phone = (form.elements.namedItem("phone") as HTMLInputElement).value.trim();
+      const address = (form.elements.namedItem("address") as HTMLTextAreaElement).value.trim();
+      const notes = (form.elements.namedItem("notes") as HTMLTextAreaElement).value.trim();
+
+      // Disable submit AFTER click so the same idempotency_key cannot be sent twice
+      // from the same form-load. Server-side precheck still wins races, but this is
+      // the cheap first line of defense.
+      submitBtn.disabled = true;
+      submitBtn.textContent = "建立中...";
+
+      try {
+        const res = await fetch("/api/admin/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            idempotency_key: idempotencyKey,
+            name,
+            phone,
+            address,
+            items,
+            notes,
+          }),
+        });
+        const data = (await res.json()) as
+          | { ok: true; order_id: string; replayed?: boolean }
+          | { ok: false; error_code: string; message?: string; sold_out_sku?: string };
+
+        if (!data.ok) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "建立訂單";
+          const msg =
+            data.error_code === "SOLD_OUT"
+              ? `品項 ${data.sold_out_sku ?? ""} 庫存不夠，請調整數量或重新整理頁面看當前庫存。`
+              : data.error_code === "csrf"
+                ? "驗證失敗，請重新登入。"
+                : data.error_code === "no_session" || data.error_code === "invalid_session" || data.error_code === "expired"
+                  ? "登入已過期，請重新登入。"
+                  : data.message ?? `建立失敗（${data.error_code}）。`;
+          showError(msg);
+          return;
+        }
+
+        // Success — go to detail page (existing or just-created)
+        window.location.href = `/admin/orders/${data.order_id}`;
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "建立訂單";
+        showError("網路錯誤，請稍後再試。");
+      }
+    });
+  }
+</script>
