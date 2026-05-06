@@ -744,7 +744,7 @@ Audit log：
 **並發測試怎麼跑**：
 ```ts
 // 在 stage 環境跑（不能用 local dev 因為 D1 isolate 行為不同）
-const url = "https://mango-hsu-stage.workers.dev/api/orders";
+const url = "https://mango-hsu-stage.rhsu.workers.dev/api/orders";
 const body = JSON.stringify({ /* 同一個 SKU，qty=1 */ });
 const [r1, r2] = await Promise.all([
   fetch(url, { method: "POST", body, headers: { /* 不同 idempotency_key */ } }),
@@ -783,7 +783,7 @@ console.log(await r1.json(), await r2.json());
     - 新 `bunfig.toml` 預載 `_setup.ts`
     - 新 `tests/stock-helper.test.ts`（3 unit），`tests/stock-d1.test.ts`（5 D1 integration），`tests/admin-idempotency.test.ts`（2），`tests/regression-cancelled-orders.test.ts`（2）
     - 共 12 個 test，covers V4 raison d'être 6 個 ★★★ critical 路徑
-    - 環境變數：本機跑 `MANGO_STAGE_URL=https://mango-hsu-stage.workers.dev TEST_TOKEN=xxx bun test`
+    - 環境變數：本機跑 `MANGO_STAGE_URL=https://mango-hsu-stage.rhsu.workers.dev TEST_TOKEN=xxx bun test`
     - 前置：`wrangler login` 完成，wrangler 已在 devDeps
     - CLAUDE.md 加 Testing section
 13. **`docs/family-runbook.md`** 更新（教太太怎麼用 admin/orders/new；告知姑姑「我們會在當天晚上補你的單」流程）

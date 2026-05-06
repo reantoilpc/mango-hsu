@@ -1,7 +1,7 @@
 // V4 test infra. See docs/design-v4.md "Testing" section.
 //
 // Required env (read from process.env):
-//   MANGO_STAGE_URL  — base URL of the stage worker (e.g. https://mango-hsu-stage.workers.dev)
+//   MANGO_STAGE_URL  — base URL of the stage worker (e.g. https://mango-hsu-stage.rhsu.workers.dev)
 //   TEST_TOKEN       — stage's ORDER_TOKEN secret (NEVER prod's)
 //
 // Required local state:

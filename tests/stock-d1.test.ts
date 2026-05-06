@@ -1,5 +1,5 @@
 // V4 D1 integration tests against stage worker. Requires:
-//   MANGO_STAGE_URL  — e.g. https://mango-hsu-stage.workers.dev
+//   MANGO_STAGE_URL  — e.g. https://mango-hsu-stage.rhsu.workers.dev
 //   TEST_TOKEN       — stage's ORDER_TOKEN (NEVER prod's)
 //   wrangler login completed (or CLOUDFLARE_API_TOKEN env var set)
 //
