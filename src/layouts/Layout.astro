@@ -48,16 +48,16 @@ const isAdminShell = pathname.startsWith("/admin") && !!session;
         </a>
         {isAdminShell ? (
           <nav class="flex gap-1 text-sm">
-            <a href="/admin/orders" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">訂單</a>
-            <a href="/admin/products" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">商品</a>
-            <a href="/admin/audit" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更紀錄</a>
-            <a href="/admin/change-password" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更密碼</a>
+            <a href="/admin/orders" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">訂單</a>
+            <a href="/admin/products" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">商品</a>
+            <a href="/admin/audit" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更紀錄</a>
+            <a href="/admin/change-password" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更密碼</a>
           </nav>
         ) : (
           <nav class="flex gap-1 text-sm">
-            <a href="/products" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">產品</a>
-            <a href="/order" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">下訂</a>
-            <a href="/status" class="px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">查詢</a>
+            <a href="/products" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">產品</a>
+            <a href="/order" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">下訂</a>
+            <a href="/status" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">查詢</a>
           </nav>
         )}
       </div>
