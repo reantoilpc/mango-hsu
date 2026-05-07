@@ -1,0 +1,48 @@
+---
+// V5 sticky save bar.
+// Hidden when no dirty fields. Pages wire it up via inline script:
+//   - Update [data-sticky-count] text on dirty change
+//   - Toggle [data-sticky-bar] hidden class
+//   - Wire [data-sticky-save] / [data-sticky-discard] click handlers
+//   - Listen for Cmd/Ctrl+S to fire save
+//
+// Per design tokens (visual spec):
+//   - Desktop ≥sm: top-right floating, w-72, rounded-md, shadow-md, mango-600 bg
+//   - Mobile <sm: full-width bottom-fixed, sticky to safe-area
+//
+// Each page can have its own sticky bar by passing different scopeId.
+interface Props {
+  scopeId: string; // e.g. "order-edit", "products-list"
+}
+const { scopeId } = Astro.props;
+---
+
+<div
+  id={`sticky-bar-${scopeId}`}
+  class="hidden fixed bottom-0 inset-x-0 z-30 bg-mango-600 text-white shadow-md px-4 py-3 pb-safe-plus-4 transition-transform sm:bottom-6 sm:right-6 sm:left-auto sm:inset-x-auto sm:w-72 sm:rounded-md sm:px-4 sm:py-3"
+  role="region"
+  aria-label="未儲存變動"
+  data-sticky-bar={scopeId}
+>
+  <div class="flex items-center gap-3 sm:flex-col sm:items-stretch">
+    <span data-sticky-count={scopeId} class="flex-1 text-sm font-medium sm:text-center">
+      儲存 0 處變動
+    </span>
+    <div class="flex gap-2 sm:flex-row">
+      <button
+        type="button"
+        data-sticky-discard={scopeId}
+        class="flex-1 inline-flex items-center justify-center min-h-[44px] px-3 py-2 rounded border border-white/30 text-sm hover:bg-mango-700 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        捨棄
+      </button>
+      <button
+        type="button"
+        data-sticky-save={scopeId}
+        class="flex-1 inline-flex items-center justify-center min-h-[44px] px-3 py-2 rounded bg-white text-mango-700 text-sm font-medium hover:bg-mango-50 disabled:bg-mango-100 disabled:text-mango-400 disabled:cursor-not-allowed"
+      >
+        <span data-sticky-save-label={scopeId}>儲存</span>
+      </button>
+    </div>
+  </div>
+</div>
