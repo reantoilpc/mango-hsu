@@ -1,11 +1,10 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
+import StickyBar from "../../../components/admin/StickyBar.astro";
 import { makeDb } from "../../../db/client";
 import { products } from "../../../db/schema";
 import { asc } from "drizzle-orm";
 import { env } from "../../../lib/env";
-
-
 
 const session = Astro.locals.session;
 if (!session) return Astro.redirect("/admin/login");
@@ -21,7 +20,7 @@ const productRows = await db
 ---
 
 <Layout title="商品管理">
-  <main class="mx-auto max-w-3xl px-4 py-6">
+  <main class="mx-auto max-w-3xl px-4 py-6 pb-32">
     <header class="mb-6 flex items-center justify-between">
       <h1 class="text-2xl font-bold">商品管理</h1>
       <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
@@ -30,79 +29,87 @@ const productRows = await db
     <p class="mb-4 text-sm text-gray-600">
       下架某商品就把「上架」取消勾選；不要刪 SKU（會破壞舊訂單品項關聯）。
       <br />
-      「順序」= 商品在客人頁的排列順序（數字小的先），<strong>不是庫存</strong>。庫存在每列下方「庫存 X 包 ・ 調整」面板調整。
+      「順序」= 商品在客人頁的排列順序（數字小的先），<strong>不是庫存</strong>。
+      <br />
+      <strong>欄位變動（名稱/規格/價格/順序/上架）</strong>用底部統一儲存。<strong>庫存調整</strong>有額外的未出貨檢查，走每列的「調整」面板。
     </p>
 
-    <ul class="mb-8 divide-y divide-gray-200 rounded border border-gray-200">
-      <li class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem] items-center gap-2 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
+    <ul
+      class="mb-8 divide-y divide-gray-200 rounded border border-gray-200"
+      data-dirty-track="products"
+    >
+      <li class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem] items-center gap-2 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
         <div>SKU</div>
         <div>名稱</div>
         <div>規格</div>
         <div>價格</div>
         <div>順序</div>
         <div class="text-center">上架</div>
-        <div></div>
       </li>
       {productRows.map((p) => (
-        <li class="px-4 py-3 space-y-2">
-          <form
-            class="prod-form grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem]"
-            data-sku={p.sku}
-          >
+        <li class="px-4 py-3 space-y-2" data-prod-row data-sku={p.sku}>
+          <div class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem]">
             <div class="font-mono text-sm text-gray-700">{p.sku}</div>
             <input
               type="text"
-              name="name"
+              data-dirty-key={`${p.sku}__name`}
+              data-prod-field="name"
               value={p.name}
               required
-              aria-label="名稱"
-              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              maxlength="50"
+              aria-label={`${p.sku} 名稱`}
+              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
               placeholder="名稱"
             />
             <input
               type="text"
-              name="variant"
+              data-dirty-key={`${p.sku}__variant`}
+              data-prod-field="variant"
               value={p.variant}
               required
-              aria-label="規格"
-              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              maxlength="30"
+              aria-label={`${p.sku} 規格`}
+              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
               placeholder="規格"
             />
             <input
               type="number"
-              name="price"
+              data-dirty-key={`${p.sku}__price`}
+              data-prod-field="price"
               value={p.price}
               required
               min="0"
-              aria-label="價格"
-              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              max="100000"
+              aria-label={`${p.sku} 價格`}
+              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
               placeholder="價格"
             />
             <input
               type="number"
-              name="display_order"
+              data-dirty-key={`${p.sku}__display_order`}
+              data-prod-field="display_order"
               value={p.display_order}
               required
-              aria-label="順序（顯示排序，非庫存）"
-              class="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              min="0"
+              aria-label={`${p.sku} 順序`}
+              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
               placeholder="順序"
             />
-            <label class="flex items-center justify-center gap-1 text-sm">
-              <input type="checkbox" name="available" checked={p.available} />
+            <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
+              <input
+                type="checkbox"
+                data-dirty-key={`${p.sku}__available`}
+                data-prod-field="available"
+                checked={p.available}
+                aria-label={`${p.sku} 上架`}
+              />
               <span>上架</span>
             </label>
-            <button
-              type="submit"
-              class="col-span-2 rounded bg-orange-600 px-3 py-1.5 text-sm text-white hover:bg-orange-700 sm:col-span-1"
-            >
-              儲存
-            </button>
-          </form>
+          </div>
 
-          {/* V4: stock adjust panel */}
           <details class="stock-adjust rounded border border-mango-200 bg-mango-50 px-3 py-2 text-sm" data-sku={p.sku} data-current-stock={p.stock}>
-            <summary class="cursor-pointer text-mango-800">
-              庫存 <span class="font-semibold">{p.stock}</span> 包 ・ 調整
+            <summary class="cursor-pointer text-mango-800 min-h-[44px] flex items-center">
+              庫存 <span class="mx-1 font-semibold">{p.stock}</span> 包 ・ 調整
             </summary>
             <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[5rem_1fr_5rem]">
               <input
@@ -111,19 +118,21 @@ const productRows = await db
                 min="0"
                 max="9999"
                 value={p.stock}
-                class="rounded border border-gray-300 px-2 py-1 text-sm"
+                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
                 placeholder="新庫存"
+                aria-label={`${p.sku} 新庫存`}
               />
               <input
                 type="text"
                 name="reason"
                 maxlength="200"
-                class="rounded border border-gray-300 px-2 py-1 text-sm"
+                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
                 placeholder="原因（補貨 / 校正 / 壞貨報廢...）"
+                aria-label={`${p.sku} 庫存調整原因`}
               />
               <button
                 type="button"
-                class="stock-save-btn rounded bg-mango-600 px-3 py-1 text-sm text-white hover:bg-mango-700 disabled:bg-mango-300"
+                class="stock-save-btn inline-flex items-center justify-center rounded bg-mango-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
               >
                 儲存
               </button>
@@ -158,20 +167,20 @@ const productRows = await db
           required
           pattern="[A-Z0-9_-]+"
           aria-label="SKU"
-          class="rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+          class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono"
           placeholder="SKU"
         />
-        <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="名稱" />
-        <input type="text" name="variant" required aria-label="規格" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="規格" />
-        <input type="number" name="price" required min="0" aria-label="價格" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="價格" />
-        <input type="number" name="display_order" required value="0" aria-label="順序（顯示排序，非庫存）" class="rounded border border-gray-300 px-2 py-1.5 text-sm" placeholder="順序" />
-        <label class="flex items-center justify-center gap-1 text-sm">
+        <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="名稱" />
+        <input type="text" name="variant" required aria-label="規格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="規格" />
+        <input type="number" name="price" required min="0" aria-label="價格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="價格" />
+        <input type="number" name="display_order" required value="0" aria-label="順序" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="順序" />
+        <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
           <input type="checkbox" name="available" checked />
           <span>上架</span>
         </label>
         <button
           type="submit"
-          class="col-span-2 rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700 sm:col-span-1"
+          class="col-span-2 inline-flex items-center justify-center rounded bg-amber-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-amber-700 sm:col-span-1"
         >
           新增
         </button>
@@ -179,57 +188,172 @@ const productRows = await db
     </section>
   </main>
 
+  <StickyBar scopeId="products-list" />
+
   <script>
-    function readForm(form: HTMLFormElement) {
-      const fd = new FormData(form);
-      return {
-        name: String(fd.get("name") ?? "").trim(),
-        variant: String(fd.get("variant") ?? "").trim(),
-        price: Number(fd.get("price") ?? 0),
-        available: fd.get("available") === "on",
-        display_order: Number(fd.get("display_order") ?? 0),
-      };
+    import { showToast } from "../../../lib/toast";
+    import { createDirtyTracker } from "../../../lib/dirty-tracker";
+
+    interface ProductFieldsPayload {
+      name?: string;
+      variant?: string;
+      price?: number;
+      available?: boolean;
+      display_order?: number;
     }
 
-    document.querySelectorAll<HTMLFormElement>(".prod-form").forEach((form) => {
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const sku = form.dataset.sku!;
-        const data = readForm(form);
-        const res = await fetch(`/api/admin/products/${encodeURIComponent(sku)}/update`, {
+    interface BatchRow {
+      sku: string;
+      fields?: ProductFieldsPayload;
+    }
+
+    // ============ Dirty tracker for product field rows ============
+    const productsList = document.querySelector<HTMLElement>(
+      '[data-dirty-track="products"]',
+    );
+    const tracker = productsList
+      ? createDirtyTracker({
+          root: productsList,
+          onChange: () => updateStickyBar(),
+        })
+      : null;
+
+    const stickyBar = document.querySelector<HTMLElement>(
+      '[data-sticky-bar="products-list"]',
+    );
+    const stickyCount = document.querySelector<HTMLElement>(
+      '[data-sticky-count="products-list"]',
+    );
+    const stickySave = document.querySelector<HTMLButtonElement>(
+      '[data-sticky-save="products-list"]',
+    );
+    const stickyDiscard = document.querySelector<HTMLButtonElement>(
+      '[data-sticky-discard="products-list"]',
+    );
+    const stickySaveLabel = document.querySelector<HTMLElement>(
+      '[data-sticky-save-label="products-list"]',
+    );
+
+    let saving = false;
+
+    function updateStickyBar(): void {
+      if (!tracker || !stickyBar || !stickyCount) return;
+      const n = tracker.getDirty().count;
+      stickyCount.textContent = `儲存 ${n} 處變動`;
+      if (n === 0) stickyBar.classList.add("hidden");
+      else stickyBar.classList.remove("hidden");
+    }
+
+    function lockAll(): void {
+      saving = true;
+      tracker?.lock();
+      if (stickySave) stickySave.disabled = true;
+      if (stickyDiscard) stickyDiscard.disabled = true;
+      if (stickySaveLabel) stickySaveLabel.textContent = "儲存中...";
+    }
+
+    function unlockAll(): void {
+      saving = false;
+      tracker?.unlock();
+      if (stickySave) stickySave.disabled = false;
+      if (stickyDiscard) stickyDiscard.disabled = false;
+      if (stickySaveLabel) stickySaveLabel.textContent = "儲存";
+    }
+
+    // Group dirty fields by SKU into batch rows.
+    function buildBatchPayload(): BatchRow[] {
+      if (!tracker) return [];
+      const dirty = tracker.getDirty();
+      const bySku = new Map<string, ProductFieldsPayload>();
+
+      for (const [key, change] of dirty.changed) {
+        // dirty key format: `${sku}__${field}`
+        const idx = key.indexOf("__");
+        if (idx < 0) continue;
+        const sku = key.slice(0, idx);
+        const field = key.slice(idx + 2) as keyof ProductFieldsPayload;
+        const fields = bySku.get(sku) ?? {};
+        const v = change.after;
+        if (field === "name" || field === "variant") {
+          fields[field] = String(v);
+        } else if (field === "price" || field === "display_order") {
+          fields[field] = Number(v);
+        } else if (field === "available") {
+          fields[field] = Boolean(v);
+        }
+        bySku.set(sku, fields);
+      }
+
+      return Array.from(bySku.entries()).map(([sku, fields]) => ({ sku, fields }));
+    }
+
+    async function doSave(): Promise<void> {
+      if (saving || !tracker) return;
+      const rows = buildBatchPayload();
+      if (rows.length === 0) return;
+
+      lockAll();
+      try {
+        const res = await fetch("/api/admin/products/batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
+          credentials: "same-origin",
+          body: JSON.stringify({
+            rows,
+            idempotency_key: crypto.randomUUID(),
+          }),
         });
-        if (res.ok) location.reload();
-        else alert("儲存失敗：" + (await res.text()));
-      });
-    });
-
-    const createForm = document.getElementById("create-form") as HTMLFormElement | null;
-    createForm?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const fd = new FormData(createForm);
-      const data = {
-        sku: String(fd.get("sku") ?? "").trim(),
-        ...readForm(createForm),
-      };
-      if (!/^[A-Z0-9_-]+$/.test(data.sku)) {
-        alert("SKU 只能大寫英數、底線、連字號");
-        return;
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error_code?: string;
+          message?: string;
+          applied?: number;
+        };
+        if (!res.ok || data.ok === false) {
+          showToast(`儲存失敗：${data.message ?? data.error_code ?? res.status}`, {
+            kind: "error",
+          });
+          unlockAll();
+          return;
+        }
+        showToast(`已儲存 ${rows.length} 行變動`, { kind: "success" });
+        location.reload();
+      } catch {
+        showToast("網路錯誤，請稍後再試", { kind: "error" });
+        unlockAll();
       }
-      const res = await fetch("/api/admin/products/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) location.reload();
-      else alert("新增失敗：" + (await res.text()));
+    }
+
+    function doDiscard(): void {
+      if (saving) return;
+      tracker?.discard();
+    }
+
+    stickySave?.addEventListener("click", doSave);
+    stickyDiscard?.addEventListener("click", doDiscard);
+
+    document.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        const dirty = tracker?.getDirty().count ?? 0;
+        if (dirty > 0 && !saving) {
+          e.preventDefault();
+          doSave();
+        }
+      } else if (e.key === "Escape") {
+        const dirty = tracker?.getDirty().count ?? 0;
+        if (dirty > 0 && !saving) doDiscard();
+      }
     });
 
-    // V4: stock adjust per-row. Two-step: first attempt without override.
-    // If server returns STOCK_BELOW_UNSHIPPED, confirm with the user, then
-    // resubmit with override_unshipped=true.
+    window.addEventListener("beforeunload", (e) => {
+      const dirty = tracker?.getDirty().count ?? 0;
+      if (dirty > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
+
+    // ============ Stock adjust per-row (V4 flow, Open Q #6 destructive exception) ============
     document.querySelectorAll<HTMLDetailsElement>(".stock-adjust").forEach((panel) => {
       const sku = panel.dataset.sku!;
       const newStockInput = panel.querySelector<HTMLInputElement>('input[name="new_stock"]')!;
@@ -237,11 +361,11 @@ const productRows = await db
       const saveBtn = panel.querySelector<HTMLButtonElement>(".stock-save-btn")!;
       const errEl = panel.querySelector<HTMLElement>(".stock-error")!;
 
-      function showErr(msg: string) {
+      function showErr(msg: string): void {
         errEl.textContent = msg;
         errEl.classList.remove("hidden");
       }
-      function clearErr() {
+      function clearErr(): void {
         errEl.textContent = "";
         errEl.classList.add("hidden");
       }
@@ -275,12 +399,15 @@ const productRows = await db
             current_stock?: number;
           };
           if (res.ok && data.ok) {
-            location.reload();
+            showToast(`${sku} 庫存已更新`, { kind: "success" });
+            setTimeout(() => location.reload(), 400);
             return;
           }
           if (data.error_code === "STOCK_BELOW_UNSHIPPED" && !override) {
             const u = data.unshipped_total;
             const c = data.current_stock;
+            // Destructive exception (Open Q #6): keep native confirm() for V5;
+            // modernization deferred to V6.
             if (
               confirm(
                 `未出貨單共 ${u} 包，新庫存 ${new_stock} 比這還少（目前 ${c} 包）。確定？\n` +
@@ -297,7 +424,7 @@ const productRows = await db
           showErr(`儲存失敗：${data.message ?? data.error_code ?? res.status}`);
           saveBtn.disabled = false;
           saveBtn.textContent = original;
-        } catch (e) {
+        } catch {
           showErr("網路錯誤，請稍後再試。");
           saveBtn.disabled = false;
           saveBtn.textContent = original;
@@ -309,5 +436,51 @@ const productRows = await db
         await submit(false);
       });
     });
+
+    // ============ Create new product (separate flow) ============
+    function readForm(form: HTMLFormElement): {
+      name: string;
+      variant: string;
+      price: number;
+      available: boolean;
+      display_order: number;
+    } {
+      const fd = new FormData(form);
+      return {
+        name: String(fd.get("name") ?? "").trim(),
+        variant: String(fd.get("variant") ?? "").trim(),
+        price: Number(fd.get("price") ?? 0),
+        available: fd.get("available") === "on",
+        display_order: Number(fd.get("display_order") ?? 0),
+      };
+    }
+
+    const createForm = document.getElementById("create-form") as HTMLFormElement | null;
+    createForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(createForm);
+      const data = {
+        sku: String(fd.get("sku") ?? "").trim(),
+        ...readForm(createForm),
+      };
+      if (!/^[A-Z0-9_-]+$/.test(data.sku)) {
+        showToast("SKU 只能大寫英數、底線、連字號", { kind: "error" });
+        return;
+      }
+      const res = await fetch("/api/admin/products/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        showToast("已新增商品", { kind: "success" });
+        setTimeout(() => location.reload(), 400);
+      } else {
+        showToast(`新增失敗：${await res.text()}`, { kind: "error" });
+      }
+    });
+
+    updateStickyBar();
   </script>
 </Layout>
