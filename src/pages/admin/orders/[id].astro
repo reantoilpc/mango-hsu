@@ -219,7 +219,7 @@ const sellableForNew = productRows
     <section class="mb-6 rounded border border-gray-200 p-4">
       <h2 class="mb-3 text-lg font-bold">操作</h2>
       <div class="space-y-3">
-        {!order.paid && (
+        {!order.paid && order.cancelled_at === null && (
           <button
             id="mark-paid"
             class="w-full rounded bg-emerald-600 px-4 py-3 text-base font-medium text-white hover:bg-emerald-700"

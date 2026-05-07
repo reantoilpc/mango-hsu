@@ -17,9 +17,12 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
   const db = makeDb(env);
   const now = new Date().toISOString();
 
+  // cancelled_at IS NULL guards against marking a cancelled order paid
+  // (cancelled order's stock has been restored — promoting to paid would
+  // create an inconsistent cancelled+paid state).
   const result = await env.DB.batch([
     env.DB.prepare(
-      "UPDATE orders SET paid = 1, paid_at = ?, paid_by = ? WHERE order_id = ? AND paid = 0",
+      "UPDATE orders SET paid = 1, paid_at = ?, paid_by = ? WHERE order_id = ? AND paid = 0 AND cancelled_at IS NULL",
     ).bind(now, auth.session.email, id),
     env.DB.prepare(
       "INSERT INTO audit_log (ts, user_email, action, order_id) VALUES (?, ?, 'mark_paid', ?)",
@@ -27,6 +30,6 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
   ]);
 
   const changes = result[0]?.meta?.changes ?? 0;
-  if (changes === 0) return text("not_changed (already paid?)", 409);
+  if (changes === 0) return text("not_changed (already paid? cancelled?)", 409);
   return json({ ok: true });
 };
