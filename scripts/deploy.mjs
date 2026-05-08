@@ -19,6 +19,7 @@ const STAGE = {
   ratelimit_kv_id: "3c7807740837434688a43ab8cda83bb8",
   session_kv_id: "fc11f54aa027461d895c35ce6afa0c7d",
   bank_account_display: "808 玉山銀行 / 0901979086154 (STAGE)",
+  allow_test_bypass: "1",
 };
 
 const PROD = {
@@ -58,6 +59,7 @@ wrangler.kv_namespaces = [
 wrangler.vars = {
   ...wrangler.vars,
   BANK_ACCOUNT_DISPLAY: cfg.bank_account_display,
+  ...(cfg.allow_test_bypass ? { ALLOW_TEST_BYPASS: cfg.allow_test_bypass } : {}),
 };
 
 writeFileSync(path, JSON.stringify(wrangler, null, 2));

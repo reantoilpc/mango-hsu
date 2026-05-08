@@ -11,6 +11,9 @@ export type AppEnv = {
   FREE_SHIPPING_MIN_PACKAGES: string;
   ETA_DAYS_AFTER_PAYMENT: string;
   ACCEPTING_DRY: string;
+  // Stage-only: when "1", X-Test-Mode header bypasses /api/orders rate limit.
+  // Never set on prod — absence of the var means the bypass code path is dead.
+  ALLOW_TEST_BYPASS?: string;
   // Secrets (set via `wrangler secret put`)
   ORDER_TOKEN: string;
   TELEGRAM_BOT_TOKEN: string;
