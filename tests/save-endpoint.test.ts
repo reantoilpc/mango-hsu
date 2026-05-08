@@ -20,8 +20,8 @@ import {
 } from "./_setup";
 
 const SKIP = skipIfNoIntegration();
-const TEST_SKU_A = "test-mango-save-a";
-const TEST_SKU_B = "test-mango-save-b";
+const TEST_SKU_A = "TEST-MANGO-SAVE-A";
+const TEST_SKU_B = "TEST-MANGO-SAVE-B";
 
 beforeEach(() => {
   if (SKIP) return;
@@ -38,7 +38,7 @@ afterAll(() => {
 async function placeCustomerOrder(sku: string, qty: number): Promise<string> {
   const res = await fetch(`${STAGE_URL}/api/orders`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Test-Mode": "1" },
     body: JSON.stringify({
       idempotency_key: `test-${crypto.randomUUID()}`,
       token: TEST_TOKEN,

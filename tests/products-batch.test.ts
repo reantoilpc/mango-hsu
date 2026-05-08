@@ -17,8 +17,8 @@ import {
 } from "./_setup";
 
 const SKIP = skipIfNoIntegration();
-const TEST_SKU_A = "test-batch-a";
-const TEST_SKU_B = "test-batch-b";
+const TEST_SKU_A = "TEST-BATCH-A";
+const TEST_SKU_B = "TEST-BATCH-B";
 
 beforeEach(() => {
   if (SKIP) return;
@@ -62,7 +62,7 @@ async function adminBatch(cookie: string, payload: BatchPayload): Promise<Respon
 async function placeCustomerOrder(sku: string, qty: number): Promise<string> {
   const res = await fetch(`${STAGE_URL}/api/orders`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Test-Mode": "1" },
     body: JSON.stringify({
       idempotency_key: `test-${crypto.randomUUID()}`,
       token: TEST_TOKEN,
@@ -181,7 +181,7 @@ describe("V5 /products/batch endpoint", () => {
     if (SKIP) return;
     const cookie = createTestAdminSession();
     const res = await adminBatch(cookie, {
-      rows: [{ sku: "test-doesnt-exist", fields: { price: 1 } }],
+      rows: [{ sku: "TEST-DOESNT-EXIST", fields: { price: 1 } }],
     });
     expect(res.status).toBe(404);
   });

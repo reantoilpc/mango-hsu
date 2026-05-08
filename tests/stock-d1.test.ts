@@ -21,7 +21,7 @@ import {
 } from "./_setup";
 
 const SKIP = skipIfNoIntegration();
-const TEST_SKU = "test-mango-d1";
+const TEST_SKU = "TEST-MANGO-D1";
 
 beforeEach(() => {
   if (SKIP) return;
