@@ -53,7 +53,8 @@
         "SHIPPING_FEE_TWD": "80",
         "FREE_SHIPPING_MIN_PACKAGES": "10",
         "ETA_DAYS_AFTER_PAYMENT": "5",
-        "ACCEPTING_DRY": "true"
+        "ACCEPTING_DRY": "true",
+        "ALLOW_TEST_BYPASS": "1"
       },
       "d1_databases": [
         {

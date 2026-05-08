@@ -33,8 +33,8 @@ if (!STAGE_URL || !TEST_TOKEN) {
 
 export function d1Execute(sql: string): unknown[] {
   const r = spawnSync(
-    "wrangler",
-    ["d1", "execute", D1_DATABASE, "--remote", "--json", "--command", sql],
+    "bunx",
+    ["wrangler", "d1", "execute", D1_DATABASE, "--remote", "--json", "--command", sql],
     { encoding: "utf-8" },
   );
   if (r.status !== 0) {
@@ -60,8 +60,8 @@ export function d1Execute(sql: string): unknown[] {
 // tests so each scenario starts clean.
 export function clearOrderRateLimit() {
   const list = spawnSync(
-    "wrangler",
-    ["kv", "key", "list", "--binding=RATELIMIT", "--env=stage", "--remote", "--prefix=rl:order:"],
+    "bunx",
+    ["wrangler", "kv", "key", "list", "--binding=RATELIMIT", "--env=stage", "--remote", "--prefix=rl:order:"],
     { encoding: "utf-8" },
   );
   if (list.status !== 0) return;
@@ -73,17 +73,17 @@ export function clearOrderRateLimit() {
   }
   for (const { name } of keys) {
     spawnSync(
-      "wrangler",
-      ["kv", "key", "delete", name, "--binding=RATELIMIT", "--env=stage", "--remote"],
+      "bunx",
+      ["wrangler", "kv", "key", "delete", name, "--binding=RATELIMIT", "--env=stage", "--remote"],
       { encoding: "utf-8" },
     );
   }
 }
 
-// Test data uses a `test-` prefix on SKUs and customer names so cleanup
-// can target only test rows without touching real production data
-// (we never run these against prod, but defense in depth).
-export const TEST_SKU_PREFIX = "test-";
+// Test data prefixes scoped per-column. SKUs go uppercase (`TEST-`) because
+// the admin product validators enforce `[A-Z0-9_-]+`; customer names stay
+// lowercase (`test-`) since names have no regex constraint.
+export const TEST_SKU_PREFIX = "TEST-";
 export const TEST_NAME_PREFIX = "test-";
 
 export function seedSku(sku: string, opts: { stock: number; price?: number; available?: boolean }) {
@@ -124,11 +124,14 @@ export function cleanupTestData() {
 }
 
 // Simple wrapper for fetching the stage worker. Tests pass headers / body etc.
+// `X-Test-Mode: 1` is added automatically; the stage worker honours it (with a
+// valid ORDER_TOKEN) to bypass rate limits since all tests share one IP.
 export async function stageFetch(path: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${STAGE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "X-Test-Mode": "1",
       ...(init.headers ?? {}),
     },
   });

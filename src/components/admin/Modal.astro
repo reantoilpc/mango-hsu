@@ -1,0 +1,71 @@
+---
+// V5 destructive-confirm modal. Uses native <dialog> element for free a11y:
+//   - role="dialog" aria-modal="true" implicit
+//   - focus trap built-in
+//   - Esc key closes
+//   - backdrop CSS via ::backdrop
+//   - tab cycle within dialog when open
+//
+// Pages call .showModal() / .close() and listen for confirm-button click.
+interface Props {
+  id: string;
+  title: string;
+  destructive?: boolean;
+  confirmLabel?: string;
+  cancelLabel?: string;
+}
+const {
+  id,
+  title,
+  destructive = false,
+  confirmLabel = "確認",
+  cancelLabel = "取消",
+} = Astro.props;
+---
+
+<dialog
+  id={id}
+  class="rounded-lg p-0 w-[calc(100vw-32px)] max-w-[90vw] sm:w-[480px] backdrop:bg-black/50"
+  aria-labelledby={`${id}-title`}
+>
+  <div class="bg-white rounded-lg">
+    <header class="px-6 py-4 border-b border-gray-200">
+      <h2 id={`${id}-title`} class="text-lg font-semibold">{title}</h2>
+    </header>
+    <div class="px-6 py-4 text-sm text-gray-700">
+      <slot />
+    </div>
+    <footer class="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+      <button
+        type="button"
+        data-modal-cancel
+        class="inline-flex items-center justify-center min-h-[44px] px-4 py-2 rounded border border-gray-300 text-sm hover:bg-gray-50"
+      >
+        {cancelLabel}
+      </button>
+      <button
+        type="button"
+        data-modal-confirm
+        class:list={[
+          "inline-flex items-center justify-center min-h-[44px] px-4 py-2 rounded text-sm font-medium",
+          destructive
+            ? "bg-red-600 text-white hover:bg-red-700"
+            : "bg-mango-600 text-white hover:bg-mango-700",
+        ]}
+      >
+        {confirmLabel}
+      </button>
+    </footer>
+  </div>
+</dialog>
+
+<script define:vars={{ modalId: id }}>
+  const dlg = document.getElementById(modalId);
+  if (dlg && dlg instanceof HTMLDialogElement) {
+    dlg.querySelector("[data-modal-cancel]")?.addEventListener("click", () => dlg.close("cancel"));
+    // click on backdrop closes (click target = the dialog itself when click lands outside content)
+    dlg.addEventListener("click", (e) => {
+      if (e.target === dlg) dlg.close("cancel");
+    });
+  }
+</script>

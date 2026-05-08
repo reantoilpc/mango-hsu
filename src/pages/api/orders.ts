@@ -37,14 +37,6 @@ const json = (body: OrderResponse, status = 200) =>
 export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   const ctx = locals.cfContext;
 
-  const ip = request.headers.get("cf-connecting-ip") || clientAddress || "unknown";
-  if (!(await checkOrderRate(env, ip))) {
-    return new Response(JSON.stringify({ ok: false, error_code: "LOCKED" }), {
-      status: 429,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   let body: OrderRequest;
   try {
     body = (await request.json()) as OrderRequest;
@@ -57,6 +49,23 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   }
   if (!env.ORDER_TOKEN || body.token !== env.ORDER_TOKEN) {
     return json({ ok: false, error_code: "INVALID_TOKEN" });
+  }
+
+  // Stage-only rate-limit bypass for integration tests. Three gates: (1) the
+  // ALLOW_TEST_BYPASS var must be "1" — only set on stage in scripts/deploy.mjs,
+  // so prod never reaches this branch; (2) valid ORDER_TOKEN — already checked
+  // above; (3) X-Test-Mode: 1 header. Tests share one client IP and KV cache
+  // TTL prevents instant rate-limit resets between cases.
+  const ip = request.headers.get("cf-connecting-ip") || clientAddress || "unknown";
+  const isTestBypass =
+    env.ALLOW_TEST_BYPASS === "1" && request.headers.get("x-test-mode") === "1";
+  if (!isTestBypass) {
+    if (!(await checkOrderRate(env, ip))) {
+      return new Response(JSON.stringify({ ok: false, error_code: "LOCKED" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
   if (!body.idempotency_key || typeof body.idempotency_key !== "string") {
     return json({ ok: false, error_code: "INVALID_INPUT" });

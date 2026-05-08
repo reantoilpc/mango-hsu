@@ -1,0 +1,88 @@
+---
+// V5 status stepper for orders.
+//
+// 3 nodes per /autoplan design decision:
+//   下單 → 已付款 → 已出貨
+//
+// cancelled = banner replaces stepper entirely (per Phase 2 design — terminal
+// state, not progress overlay).
+//
+// Pure presentational; no client JS.
+interface Props {
+  paid: boolean;
+  shipped: boolean;
+  cancelled_at: string | null;
+  cancelled_meta?: string; // displayed as sub-text in cancelled banner
+}
+const { paid, shipped, cancelled_at, cancelled_meta } = Astro.props;
+const isCancelled = cancelled_at !== null;
+
+interface Step {
+  label: string;
+  done: boolean;
+  current: boolean;
+}
+
+const steps: Step[] = [
+  { label: "下單", done: true, current: !paid && !isCancelled },
+  { label: "已付款", done: paid, current: paid && !shipped && !isCancelled },
+  { label: "已出貨", done: shipped, current: shipped && !isCancelled },
+];
+
+function ariaLabel(s: Step): string {
+  return `${s.label}${s.done ? "（完成）" : s.current ? "（進行中）" : "（待處理）"}`;
+}
+---
+
+{
+  isCancelled ? (
+    <div
+      role="status"
+      aria-live="polite"
+      class="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-red-800"
+    >
+      <div class="text-base font-semibold">已取消</div>
+      {cancelled_meta && <div class="mt-1 text-sm font-normal">{cancelled_meta}</div>}
+    </div>
+  ) : (
+    <ol aria-label="訂單狀態" class="flex items-center gap-2">
+      {steps.map((s, i) => (
+        <>
+          <li
+            aria-current={s.current ? "step" : undefined}
+            aria-label={ariaLabel(s)}
+            class="flex flex-col items-center gap-1 flex-shrink-0"
+          >
+            <div
+              class:list={[
+                "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
+                s.done
+                  ? "bg-mango-600 text-white"
+                  : s.current
+                    ? "bg-mango-100 text-mango-700 ring-2 ring-mango-500"
+                    : "bg-gray-200 text-gray-400",
+              ]}
+              aria-hidden="true"
+            >
+              {s.done ? "✓" : i + 1}
+            </div>
+            <span class="text-xs font-medium text-gray-700">{s.label}</span>
+          </li>
+          {i < steps.length - 1 && (
+            <div
+              class:list={[
+                "h-0.5 flex-1 -mt-5",
+                steps[i + 1].done
+                  ? "bg-mango-600"
+                  : steps[i + 1].current
+                    ? "bg-mango-300"
+                    : "bg-gray-200",
+              ]}
+              aria-hidden="true"
+            />
+          )}
+        </>
+      ))}
+    </ol>
+  )
+}

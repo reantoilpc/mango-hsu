@@ -15,7 +15,7 @@ import {
 } from "./_setup";
 
 const SKIP = skipIfNoIntegration();
-const TEST_SKU = "test-mango-cancel";
+const TEST_SKU = "TEST-MANGO-CANCEL";
 
 beforeEach(() => {
   if (SKIP) return;
@@ -77,6 +77,17 @@ async function adminMarkShipped(cookie: string, orderId: string): Promise<Respon
   });
 }
 
+async function adminMarkPaid(cookie: string, orderId: string): Promise<Response> {
+  return fetch(`${STAGE_URL}/api/admin/orders/${orderId}/mark-paid`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: STAGE_URL,
+      Cookie: cookie,
+    },
+  });
+}
+
 describe("V4 cancelled-order regressions", () => {
   it("cancel restores stock and writes audit", async () => {
     if (SKIP) return;
@@ -92,6 +103,24 @@ describe("V4 cancelled-order regressions", () => {
     expect(body.ok).toBe(true);
 
     expect(getSkuStock(TEST_SKU)).toBe(5);
+  });
+
+  it("mark-paid on a cancelled order is rejected (409 not_changed)", async () => {
+    if (SKIP) return;
+    seedSku(TEST_SKU, { stock: 5 });
+    const cookie = createTestAdminSession();
+
+    const orderId = await placeCustomerOrder(1);
+    // Cancel first (cancel requires paid=0, shipped=0 — fresh order satisfies).
+    const cancelRes = await adminCancel(cookie, orderId);
+    expect(cancelRes.status).toBe(200);
+
+    // V5 fix: mark-paid must reject cancelled orders. Without the
+    // `cancelled_at IS NULL` guard, this would create a cancelled+paid
+    // state (impossible per the data model — cancelled stock is already
+    // restored, paid would imply customer owes nothing for nothing).
+    const paidRes = await adminMarkPaid(cookie, orderId);
+    expect(paidRes.status).toBe(409);
   });
 
   it("mark-shipped on a cancelled order is rejected (409 not_changed)", async () => {

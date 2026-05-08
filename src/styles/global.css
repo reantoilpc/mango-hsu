@@ -21,3 +21,20 @@ html {
 body {
   font-family: var(--font-sans);
 }
+
+/* V5: iOS safe-area for sticky bars docked to bottom */
+.pb-safe {
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
+}
+.pb-safe-plus-4 {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+
+/* V5: respect reduced-motion preference for animations */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

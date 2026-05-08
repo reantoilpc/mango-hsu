@@ -1,12 +1,13 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
+import StatusStepper from "../../../components/admin/StatusStepper.astro";
+import StickyBar from "../../../components/admin/StickyBar.astro";
+import Modal from "../../../components/admin/Modal.astro";
 import { makeDb } from "../../../db/client";
 import { orders, order_items, products, audit_log } from "../../../db/schema";
 import { eq, desc } from "drizzle-orm";
 import { itemsToReadable, formatTaipei } from "../../../lib/formatters";
 import { env } from "../../../lib/env";
-
-
 
 const session = Astro.locals.session;
 if (!session) return Astro.redirect("/admin/login");
@@ -42,9 +43,9 @@ const isAdmin = session.role === "admin";
 const cancellable = !order.paid && !order.shipped && order.cancelled_at === null;
 // V4: same gate as cancel — only edit items when the order is still pre-payment.
 const itemsEditable = cancellable;
-// Sellable products available for "+新增品項" — all available with stock > 0,
-// PLUS any already-on-the-order product (so a SKU now stock=0 is still
-// editable down to qty=0 / remove).
+// V5: address/notes editable when not cancelled (paid/shipped still allows
+// recipient corrections, matching existing /edit endpoint behavior).
+const recipientEditable = isAdmin && order.cancelled_at === null;
 const skusOnOrder = new Set(items.map((i) => i.sku));
 const sellableForNew = productRows
   .filter((p) => p.available && (p.stock > 0 || skusOnOrder.has(p.sku)))
@@ -55,261 +56,220 @@ const sellableForNew = productRows
     price: p.price,
     stock: p.stock,
   }));
+
+const cancelledMeta =
+  order.cancelled_at !== null
+    ? `${formatTaipei(order.cancelled_at)} · 庫存已歸還`
+    : undefined;
 ---
 
 <Layout>
-  <main class="mx-auto max-w-3xl px-4 py-6">
-    <header class="mb-6 flex flex-wrap items-center justify-between gap-2">
-      <div>
-        <a href="/admin/orders" class="text-sm text-gray-600 underline">← 訂單列表</a>
-        <h1 class="mt-1 text-2xl font-bold">{order.order_id}</h1>
-      </div>
-      <div class="flex gap-1">
-        {order.cancelled_at !== null && (
-          <span class="rounded px-2 py-0.5 text-xs bg-red-100 text-red-700">
-            已取消
-          </span>
-        )}
-        <span
-          class:list={[
-            "rounded px-2 py-0.5 text-xs",
-            order.paid
-              ? "bg-emerald-100 text-emerald-700"
-              : "bg-amber-100 text-amber-700",
-          ]}
-        >
-          {order.paid ? "已付款" : "待付款"}
-        </span>
-        <span
-          class:list={[
-            "rounded px-2 py-0.5 text-xs",
-            order.shipped
-              ? "bg-orange-100 text-orange-700"
-              : "bg-gray-100 text-gray-700",
-          ]}
-        >
-          {order.shipped ? "已出貨" : "待出貨"}
-        </span>
-      </div>
+  <main class="mx-auto max-w-3xl px-4 py-6 pb-32">
+    <header class="mb-6">
+      <a href="/admin/orders" class="text-sm text-gray-600 underline">← 訂單列表</a>
+      <h1 class="mt-1 text-2xl font-bold">{order.order_id}</h1>
     </header>
-    {order.cancelled_at !== null && (
-      <div class="mb-6 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
-        此訂單已於 {formatTaipei(order.cancelled_at)} 取消。庫存已歸還、不會出貨。
-      </div>
-    )}
 
-    <section class="mb-6 rounded border border-gray-200 p-4">
+    <section class="mb-6">
+      <StatusStepper
+        paid={order.paid}
+        shipped={order.shipped}
+        cancelled_at={order.cancelled_at}
+        cancelled_meta={cancelledMeta}
+      />
+    </section>
+
+    <section class="mb-6 rounded border border-gray-200 p-4" data-dirty-track="recipient">
       <h2 class="mb-3 text-lg font-bold">客人資訊</h2>
-      <dl class="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
-        <dt class="text-gray-500">姓名</dt>
+      <dl class="grid grid-cols-[6rem_1fr] gap-y-3 text-sm">
+        <dt class="text-gray-500 self-center">姓名</dt>
         <dd>{order.name}</dd>
-        <dt class="text-gray-500">電話</dt>
+        <dt class="text-gray-500 self-center">電話</dt>
         <dd>{order.phone}</dd>
-        <dt class="text-gray-500">地址</dt>
-        <dd>{order.address}</dd>
-        <dt class="text-gray-500">客戶備註</dt>
-        <dd>{order.notes || "（無）"}</dd>
-        <dt class="text-gray-500">下單時間</dt>
+        <dt class="text-gray-500 self-center">下單時間</dt>
         <dd>{formatTaipei(order.created_at)}</dd>
+        <dt class="text-gray-500 self-center">地址</dt>
+        <dd>
+          {recipientEditable ? (
+            <input
+              type="text"
+              name="address"
+              data-dirty-key="address"
+              value={order.address}
+              minlength="5"
+              maxlength="200"
+              class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+              aria-label="收件地址"
+            />
+          ) : (
+            <span>{order.address}</span>
+          )}
+        </dd>
+        <dt class="text-gray-500 self-center">客戶備註</dt>
+        <dd>
+          {recipientEditable ? (
+            <input
+              type="text"
+              name="notes"
+              data-dirty-key="notes"
+              value={order.notes ?? ""}
+              maxlength="500"
+              placeholder="（無）"
+              class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+              aria-label="客戶備註"
+            />
+          ) : (
+            <span>{order.notes || "（無）"}</span>
+          )}
+        </dd>
       </dl>
     </section>
 
     <section class="mb-6 rounded border border-gray-200 p-4">
       <h2 class="mb-3 text-lg font-bold">品項 ({itemsToReadable(items)})</h2>
-      <table class="w-full text-sm">
-        <thead class="text-left text-gray-500">
-          <tr>
-            <th class="pb-2">品項</th>
-            <th class="pb-2 text-right">單價</th>
-            <th class="pb-2 text-right">數量</th>
-            <th class="pb-2 text-right">小計</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          {items.map((i) => (
+
+      {itemsEditable && isAdmin ? (
+        <div
+          id="items-editor"
+          data-order-id={order.order_id}
+          data-initial-items={JSON.stringify(items.map((i) => ({ sku: i.sku, qty: i.qty })))}
+          data-products={JSON.stringify(sellableForNew)}
+        >
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-gray-500">
+              <tr>
+                <th class="pb-1">品項</th>
+                <th class="pb-1 text-right">單價</th>
+                <th class="pb-1 text-right">數量</th>
+                <th class="pb-1"></th>
+              </tr>
+            </thead>
+            <tbody id="items-rows"></tbody>
+          </table>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <select
+              id="add-sku-select"
+              class="rounded border border-gray-300 px-2 py-2 min-h-[44px] text-sm"
+              aria-label="新增品項選單"
+            >
+              <option value="">+ 新增品項...</option>
+            </select>
+            <button
+              type="button"
+              id="add-sku-btn"
+              class="inline-flex items-center justify-center rounded border border-mango-400 bg-white px-3 py-2 min-h-[44px] text-sm text-mango-700 hover:bg-mango-100"
+            >
+              加入
+            </button>
+          </div>
+          <div class="mt-3 grid grid-cols-2 gap-y-1 border-t border-gray-200 pt-3 text-sm">
+            <span class="text-gray-600">小計</span>
+            <span class="text-right" id="items-subtotal">${order.subtotal}</span>
+            <span class="text-gray-600">運費</span>
+            <span class="text-right" id="items-shipping">${order.shipping}</span>
+            <span class="font-medium">總計</span>
+            <span id="items-total" class="text-right font-medium">${order.total}</span>
+          </div>
+        </div>
+      ) : (
+        <table class="w-full text-sm">
+          <thead class="text-left text-gray-500">
             <tr>
-              <td class="py-2">
-                {i.product ? `${i.product.name}${i.product.variant}` : i.sku}
-              </td>
-              <td class="py-2 text-right">${i.unit_price}</td>
-              <td class="py-2 text-right">{i.qty}</td>
-              <td class="py-2 text-right">${i.unit_price * i.qty}</td>
+              <th class="pb-2">品項</th>
+              <th class="pb-2 text-right">單價</th>
+              <th class="pb-2 text-right">數量</th>
+              <th class="pb-2 text-right">小計</th>
             </tr>
-          ))}
-        </tbody>
-        <tfoot class="border-t border-gray-300 font-medium">
-          <tr>
-            <td colspan="3" class="pt-2 text-right">小計</td>
-            <td class="pt-2 text-right">${order.subtotal}</td>
-          </tr>
-          <tr>
-            <td colspan="3" class="text-right">運費</td>
-            <td class="text-right">${order.shipping}</td>
-          </tr>
-          <tr>
-            <td colspan="3" class="text-right">總計</td>
-            <td class="text-right">${order.total}</td>
-          </tr>
-        </tfoot>
-      </table>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {items.map((i) => (
+              <tr>
+                <td class="py-2">
+                  {i.product ? `${i.product.name}${i.product.variant}` : i.sku}
+                </td>
+                <td class="py-2 text-right">${i.unit_price}</td>
+                <td class="py-2 text-right">{i.qty}</td>
+                <td class="py-2 text-right">${i.unit_price * i.qty}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot class="border-t border-gray-300 font-medium">
+            <tr>
+              <td colspan="3" class="pt-2 text-right">小計</td>
+              <td class="pt-2 text-right">${order.subtotal}</td>
+            </tr>
+            <tr>
+              <td colspan="3" class="text-right">運費</td>
+              <td class="text-right">${order.shipping}</td>
+            </tr>
+            <tr>
+              <td colspan="3" class="text-right">總計</td>
+              <td class="text-right">${order.total}</td>
+            </tr>
+          </tfoot>
+        </table>
+      )}
+
       <p class="mt-3 text-sm text-gray-500">
         轉帳備註：<code class="font-mono">{order.expected_memo}</code>
       </p>
-
-      {isAdmin && itemsEditable && (
-        <details class="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm">
-          <summary class="cursor-pointer font-medium text-amber-800">
-            admin: 編輯品項
-          </summary>
-          <div
-            id="items-editor"
-            class="mt-3 space-y-3"
-            data-order-id={order.order_id}
-            data-initial-items={JSON.stringify(items.map((i) => ({ sku: i.sku, qty: i.qty })))}
-            data-products={JSON.stringify(sellableForNew)}
-          >
-            <table class="w-full text-sm">
-              <thead class="text-left text-xs text-gray-500">
-                <tr>
-                  <th class="pb-1">品項</th>
-                  <th class="pb-1 text-right">單價</th>
-                  <th class="pb-1 text-right">數量</th>
-                  <th class="pb-1"></th>
-                </tr>
-              </thead>
-              <tbody id="items-rows"></tbody>
-            </table>
-            <div class="flex flex-wrap items-center gap-2">
-              <select
-                id="add-sku-select"
-                class="rounded border border-gray-300 px-2 py-1 text-sm"
-              >
-                <option value="">+ 新增品項...</option>
-              </select>
-              <button
-                type="button"
-                id="add-sku-btn"
-                class="rounded border border-amber-400 bg-white px-3 py-1 text-sm text-amber-700 hover:bg-amber-100"
-              >
-                加入
-              </button>
-            </div>
-            <div class="flex justify-between border-t border-amber-200 pt-2 text-sm">
-              <span class="text-gray-600">調整後總計</span>
-              <span id="items-total" class="font-medium">$0</span>
-            </div>
-            <div
-              id="items-error"
-              class="hidden rounded bg-red-50 border border-red-200 px-2 py-1 text-xs text-red-700"
-            ></div>
-            <div class="flex justify-end gap-2">
-              <button
-                type="button"
-                id="items-save"
-                class="rounded bg-amber-600 px-4 py-1.5 text-sm text-white hover:bg-amber-700 disabled:bg-amber-300 disabled:cursor-not-allowed"
-              >
-                儲存品項變更
-              </button>
-            </div>
-          </div>
-        </details>
-      )}
     </section>
 
-    <section class="mb-6 rounded border border-gray-200 p-4">
-      <h2 class="mb-3 text-lg font-bold">操作</h2>
-      <div class="space-y-3">
-        {!order.paid && (
-          <button
-            id="mark-paid"
-            class="w-full rounded bg-emerald-600 px-4 py-3 text-base font-medium text-white hover:bg-emerald-700"
-          >
-            標為已付款
-          </button>
-        )}
-        {order.paid && !order.shipped && (
-          <form id="ship-form" class="flex flex-col gap-2 sm:flex-row">
-            <input
-              type="text"
-              id="tracking-input"
-              placeholder="物流單號（選填）"
-              value={order.tracking_no ?? ""}
-              class="flex-1 rounded border border-gray-300 px-3 py-3 text-base"
-            />
+    {(!order.shipped || order.cancelled_at !== null || cancellable) && (
+      <section class="mb-6 rounded border border-gray-200 p-4">
+        <h2 class="mb-3 text-lg font-bold">操作</h2>
+        <div class="space-y-3">
+          {!order.paid && order.cancelled_at === null && (
             <button
               type="button"
-              id="mark-shipped"
-              class="rounded bg-blue-600 px-4 py-3 text-base font-medium text-white hover:bg-blue-700"
+              id="mark-paid"
+              class="w-full inline-flex items-center justify-center rounded bg-emerald-600 px-4 py-3 min-h-[44px] text-base font-medium text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-not-allowed"
             >
-              標為已出貨
+              標為已付款
             </button>
-          </form>
-        )}
-        {order.shipped && (
-          <div class="text-sm">
-            出貨時間 {order.shipped_at ? formatTaipei(order.shipped_at) : "—"}
-            {order.tracking_no && ` ／ 物流 ${order.tracking_no}`}
-          </div>
-        )}
-        {isAdmin && (
-          <details class="rounded border border-amber-200 bg-amber-50 p-3 text-sm">
-            <summary class="cursor-pointer font-medium text-amber-800">
-              admin: 編輯 / 取消
-            </summary>
-            <form id="edit-form" class="mt-3 space-y-2">
-              <label class="block">
-                <span class="text-xs text-gray-600">地址</span>
-                <input
-                  name="address"
-                  value={order.address}
-                  class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <label class="block">
-                <span class="text-xs text-gray-600">客戶備註</span>
-                <input
-                  name="notes"
-                  value={order.notes ?? ""}
-                  class="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                />
-              </label>
-              <div class="flex justify-end gap-2">
-                <button
-                  type="button"
-                  id="save-edit"
-                  class="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700"
-                >
-                  儲存
-                </button>
-                {cancellable ? (
-                  <button
-                    type="button"
-                    id="cancel-order"
-                    class="rounded border border-red-400 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
-                  >
-                    取消訂單
-                  </button>
-                ) : (
-                  <span class="text-xs text-gray-500" title="已付款或已出貨的單不可在這裡取消">
-                    {order.cancelled_at !== null
-                      ? "已取消"
-                      : order.shipped
-                        ? "已出貨無法取消"
-                        : order.paid
-                          ? "已付款（需走退款流程）"
-                          : "—"}
-                  </span>
-                )}
-              </div>
-            </form>
-          </details>
-        )}
-      </div>
-    </section>
+          )}
+          {order.paid && !order.shipped && order.cancelled_at === null && (
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                id="tracking-input"
+                placeholder="物流單號（選填）"
+                value={order.tracking_no ?? ""}
+                maxlength="100"
+                class="flex-1 rounded border border-gray-300 px-3 py-3 min-h-[44px] text-base focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+                aria-label="物流單號"
+              />
+              <button
+                type="button"
+                id="mark-shipped"
+                class="inline-flex items-center justify-center rounded bg-blue-600 px-4 py-3 min-h-[44px] text-base font-medium text-white hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed"
+              >
+                標為已出貨
+              </button>
+            </div>
+          )}
+          {order.shipped && order.cancelled_at === null && (
+            <div class="text-sm text-gray-700">
+              出貨時間 {order.shipped_at ? formatTaipei(order.shipped_at) : "—"}
+              {order.tracking_no && ` ／ 物流 ${order.tracking_no}`}
+            </div>
+          )}
+          {cancellable && isAdmin && (
+            <button
+              type="button"
+              id="cancel-order"
+              class="w-full inline-flex items-center justify-center rounded border border-red-400 px-4 py-3 min-h-[44px] text-base text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              取消訂單
+            </button>
+          )}
+        </div>
+      </section>
+    )}
 
     <section class="rounded border border-gray-200 p-4">
       <h2 class="mb-3 text-lg font-bold">變更歷史</h2>
-      <ul class="space-y-2 text-xs text-gray-700">
+      <ul class="space-y-2 text-xs text-gray-700" id="audit-list">
         {auditRows.map((a) => (
           <li class="border-l-2 border-gray-200 pl-3">
             <div class="font-mono text-gray-500">{formatTaipei(a.ts)}</div>
@@ -322,210 +282,446 @@ const sellableForNew = productRows
           </li>
         ))}
         {auditRows.length === 0 && (
-          <li class="text-sm text-gray-500">（尚無紀錄）</li>
+          <li class="text-sm text-gray-500" data-empty>（尚無紀錄）</li>
         )}
       </ul>
     </section>
   </main>
 
-  <script define:vars={{ orderId: order.order_id }}>
-    async function callApi(path, body) {
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}),
-      });
-      if (!res.ok) {
-        alert("失敗：" + (await res.text()));
-        return false;
-      }
-      return true;
+  {(itemsEditable || recipientEditable) && <StickyBar scopeId="order-edit" />}
+
+  <Modal
+    id="cancel-order-modal"
+    title="確定要取消這張訂單？"
+    destructive
+    confirmLabel="確認取消"
+  >
+    <p>取消後庫存會自動歸還，這個動作無法復原。</p>
+  </Modal>
+
+  <script>
+    import { showToast } from "../../../lib/toast";
+    import { createDirtyTracker, type DirtyState } from "../../../lib/dirty-tracker";
+
+    interface ItemWorking {
+      sku: string;
+      qty: number;
+    }
+    interface ProductInfo {
+      sku: string;
+      name: string;
+      variant: string;
+      price: number;
+      stock: number;
+    }
+    interface ExpectedState {
+      paid: boolean;
+      shipped: boolean;
+      cancelled_at: string | null;
     }
 
-    document
-      .getElementById("mark-paid")
-      ?.addEventListener("click", async () => {
-        if (!confirm("確定標為已付款？")) return;
-        if (await callApi(`/api/admin/orders/${orderId}/mark-paid`)) location.reload();
-      });
+    const main = document.querySelector("main")!;
+    const orderId: string = main
+      .querySelector("h1")!
+      .textContent!.trim();
 
-    document
-      .getElementById("mark-shipped")
-      ?.addEventListener("click", async () => {
-        const trackingNo = document.getElementById("tracking-input").value.trim();
-        if (!confirm("確定標為已出貨？")) return;
-        if (
-          await callApi(`/api/admin/orders/${orderId}/mark-shipped`, {
-            tracking_no: trackingNo,
-          })
-        )
-          location.reload();
-      });
+    // Initial state from server
+    const itemsEditor = document.getElementById("items-editor");
+    const initialItems: ItemWorking[] = itemsEditor
+      ? JSON.parse(itemsEditor.dataset.initialItems!)
+      : [];
+    const productsList: ProductInfo[] = itemsEditor
+      ? JSON.parse(itemsEditor.dataset.products!)
+      : [];
+    const productMap = new Map(productsList.map((p) => [p.sku, p]));
 
-    document
-      .getElementById("save-edit")
-      ?.addEventListener("click", async () => {
-        const form = document.getElementById("edit-form");
-        const data = {
-          address: form.elements["address"].value,
-          notes: form.elements["notes"].value,
-        };
-        if (await callApi(`/api/admin/orders/${orderId}/edit`, data)) location.reload();
-      });
+    // expected_state baked from SSR via JSON island.
+    const stateNode = document.getElementById("v5-order-state");
+    let expectedState: ExpectedState = stateNode
+      ? JSON.parse(stateNode.textContent || "{}")
+      : { paid: false, shipped: false, cancelled_at: null };
 
-    document
-      .getElementById("cancel-order")
-      ?.addEventListener("click", async () => {
-        if (!confirm("取消訂單後不可復原。確定要取消？")) return;
-        if (await callApi(`/api/admin/orders/${orderId}/cancel`)) {
-          location.href = "/admin/orders";
-        }
-      });
+    // ============ Items working state ============
+    let working: ItemWorking[] = initialItems.map((i) => ({ ...i }));
 
-    // V4: item-edit local-state UI. Maintains a working copy of items[]
-    // and mutates it from button clicks; only fires PATCH on Save.
-    (function setupItemsEditor() {
-      const root = document.getElementById("items-editor");
-      if (!root) return;
-      const initial = JSON.parse(root.dataset.initialItems);
-      const products = JSON.parse(root.dataset.products);
-      const productMap = new Map(products.map((p) => [p.sku, p]));
+    function itemsDirtyCount(): number {
+      // Count: per-sku change (add/remove/qty) = 1 each.
+      const initialMap = new Map(initialItems.map((i) => [i.sku, i.qty]));
+      const workingMap = new Map(working.map((i) => [i.sku, i.qty]));
+      let n = 0;
+      for (const [sku, q] of workingMap) {
+        if (initialMap.get(sku) !== q) n += 1;
+      }
+      for (const [sku] of initialMap) {
+        if (!workingMap.has(sku)) n += 1;
+      }
+      return n;
+    }
+
+    function recomputeTotals(): void {
+      let subtotal = 0;
+      for (const w of working) {
+        const p = productMap.get(w.sku);
+        if (p) subtotal += p.price * w.qty;
+      }
+      // V4 shipping rule: family-runbook says flat 160 if subtotal < 1000, else free.
+      // Use server computation by sending a dry-run; simpler: just match existing rule.
+      // Match server's shippingFor — read from initial DOM if available.
+      const initSubtotal = parseInt(
+        document.getElementById("items-subtotal")?.textContent?.replace(/[^0-9]/g, "") || "0",
+        10,
+      );
+      const initShipping = parseInt(
+        document.getElementById("items-shipping")?.textContent?.replace(/[^0-9]/g, "") || "0",
+        10,
+      );
+      // If subtotal change crosses the free-shipping threshold we'll let the server
+      // recompute on save. For preview, recompute simply: if subtotal >= 1000 free
+      // else 160. (Mirrors src/lib/order-response.ts shippingFor — adjust if rule changes.)
+      const shipping = subtotal >= 1000 ? 0 : initShipping > 0 ? initShipping : 160;
+      const subEl = document.getElementById("items-subtotal");
+      const shipEl = document.getElementById("items-shipping");
+      const totEl = document.getElementById("items-total");
+      if (subEl) subEl.textContent = "$" + subtotal;
+      if (shipEl) shipEl.textContent = "$" + shipping;
+      if (totEl) totEl.textContent = "$" + (subtotal + shipping);
+      // Suppress unused warning
+      void initSubtotal;
+    }
+
+    function renderSelect(): void {
+      const selectEl = document.getElementById("add-sku-select") as HTMLSelectElement | null;
+      if (!selectEl) return;
+      const onOrder = new Set(working.map((i) => i.sku));
+      selectEl.innerHTML = '<option value="">+ 新增品項...</option>';
+      for (const p of productsList) {
+        if (onOrder.has(p.sku)) continue;
+        const opt = document.createElement("option");
+        opt.value = p.sku;
+        opt.textContent = `${p.name} ${p.variant} ($${p.price}, 剩 ${p.stock})`;
+        selectEl.appendChild(opt);
+      }
+    }
+
+    function renderItemsRows(): void {
       const rowsEl = document.getElementById("items-rows");
-      const totalEl = document.getElementById("items-total");
-      const selectEl = document.getElementById("add-sku-select");
-      const addBtn = document.getElementById("add-sku-btn");
-      const saveBtn = document.getElementById("items-save");
-      const errEl = document.getElementById("items-error");
-
-      // Working state — mutated locally until save.
-      let working = initial.slice();
-
-      function renderSelect() {
-        const onOrder = new Set(working.map((i) => i.sku));
-        selectEl.innerHTML = '<option value="">+ 新增品項...</option>';
-        for (const p of products) {
-          if (onOrder.has(p.sku)) continue;
-          const opt = document.createElement("option");
-          opt.value = p.sku;
-          opt.textContent = `${p.name} ${p.variant} ($${p.price}, 剩 ${p.stock})`;
-          selectEl.appendChild(opt);
-        }
+      if (!rowsEl) return;
+      rowsEl.innerHTML = "";
+      for (const item of working) {
+        const p = productMap.get(item.sku);
+        const initialQty = initialItems.find((x) => x.sku === item.sku)?.qty ?? 0;
+        const max = p
+          ? Math.min(99, Math.max(p.stock + initialQty, item.qty))
+          : 99;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="py-1">${p ? `${p.name} ${p.variant}` : item.sku}</td>
+          <td class="py-1 text-right">$${p ? p.price : "?"}</td>
+          <td class="py-1 text-right">
+            <input
+              type="number"
+              min="1"
+              max="${max}"
+              value="${item.qty}"
+              data-sku="${item.sku}"
+              class="qty-input w-16 rounded border border-gray-300 px-2 py-1 min-h-[44px] text-right focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+              aria-label="${p?.name ?? item.sku} 數量"
+            />
+          </td>
+          <td class="py-1 text-right">
+            <button
+              type="button"
+              data-remove-sku="${item.sku}"
+              class="inline-flex items-center justify-center rounded border border-red-300 min-h-[44px] min-w-[44px] px-2 text-red-700 hover:bg-red-50"
+              aria-label="移除 ${p?.name ?? item.sku}"
+              title="移除此品項"
+            >
+              ✕
+            </button>
+          </td>
+        `;
+        rowsEl.appendChild(tr);
       }
 
-      function renderRows() {
-        rowsEl.innerHTML = "";
-        let total = 0;
-        for (const item of working) {
-          const p = productMap.get(item.sku);
-          const tr = document.createElement("tr");
-          const max = p ? Math.min(99, Math.max(p.stock + (initial.find((x) => x.sku === item.sku)?.qty ?? 0), item.qty)) : 99;
-          tr.innerHTML = `
-            <td class="py-1">${p ? p.name + " " + p.variant : item.sku}</td>
-            <td class="py-1 text-right">$${p ? p.price : "?"}</td>
-            <td class="py-1 text-right">
-              <input
-                type="number"
-                min="1"
-                max="${max}"
-                value="${item.qty}"
-                data-sku="${item.sku}"
-                class="qty-input w-16 rounded border border-gray-300 px-2 py-0.5 text-right"
-              />
-            </td>
-            <td class="py-1 text-right">
-              <button
-                type="button"
-                data-remove-sku="${item.sku}"
-                class="rounded border border-red-300 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50"
-                title="移除此品項"
-              >
-                ✕
-              </button>
-            </td>
-          `;
-          rowsEl.appendChild(tr);
-          total += (p ? p.price : 0) * item.qty;
-        }
-        totalEl.textContent = "$" + total;
-
-        // Wire qty change + remove buttons
-        rowsEl.querySelectorAll(".qty-input").forEach((el) => {
-          el.addEventListener("input", (e) => {
-            const sku = e.target.dataset.sku;
-            const qty = Math.max(1, Math.floor(Number(e.target.value) || 1));
-            const it = working.find((x) => x.sku === sku);
-            if (it) it.qty = qty;
-            // recompute total without re-rendering inputs (to keep cursor)
-            let t = 0;
-            for (const w of working) {
-              const pp = productMap.get(w.sku);
-              t += (pp ? pp.price : 0) * w.qty;
-            }
-            totalEl.textContent = "$" + t;
-          });
+      rowsEl.querySelectorAll<HTMLInputElement>(".qty-input").forEach((el) => {
+        el.addEventListener("input", (e) => {
+          const target = e.target as HTMLInputElement;
+          const sku = target.dataset.sku!;
+          const qty = Math.max(1, Math.floor(Number(target.value) || 1));
+          const it = working.find((x) => x.sku === sku);
+          if (it) it.qty = qty;
+          recomputeTotals();
+          updateStickyBar();
         });
-        rowsEl.querySelectorAll("[data-remove-sku]").forEach((el) => {
-          el.addEventListener("click", (e) => {
-            const sku = e.target.dataset.removeSku;
-            working = working.filter((x) => x.sku !== sku);
-            renderSelect();
-            renderRows();
-          });
-        });
-      }
-
-      addBtn.addEventListener("click", () => {
-        const sku = selectEl.value;
-        if (!sku) return;
-        if (working.some((x) => x.sku === sku)) return;
-        working.push({ sku, qty: 1 });
-        renderSelect();
-        renderRows();
       });
+      rowsEl.querySelectorAll<HTMLButtonElement>("[data-remove-sku]").forEach((el) => {
+        el.addEventListener("click", (e) => {
+          const target = (e.currentTarget || e.target) as HTMLButtonElement;
+          const sku = target.dataset.removeSku!;
+          working = working.filter((x) => x.sku !== sku);
+          renderSelect();
+          renderItemsRows();
+          recomputeTotals();
+          updateStickyBar();
+        });
+      });
+    }
 
-      function showError(msg) {
-        errEl.textContent = msg;
-        errEl.classList.remove("hidden");
-      }
-      function clearError() {
-        errEl.textContent = "";
-        errEl.classList.add("hidden");
-      }
+    document.getElementById("add-sku-btn")?.addEventListener("click", () => {
+      const selectEl = document.getElementById("add-sku-select") as HTMLSelectElement;
+      const sku = selectEl.value;
+      if (!sku) return;
+      if (working.some((x) => x.sku === sku)) return;
+      working.push({ sku, qty: 1 });
+      renderSelect();
+      renderItemsRows();
+      recomputeTotals();
+      updateStickyBar();
+      selectEl.value = "";
+    });
 
-      saveBtn.addEventListener("click", async () => {
-        clearError();
+    // ============ Recipient (address/notes) dirty tracker ============
+    let recipientTracker: ReturnType<typeof createDirtyTracker> | null = null;
+    const recipientSection = document.querySelector<HTMLElement>(
+      '[data-dirty-track="recipient"]',
+    );
+    if (recipientSection) {
+      recipientTracker = createDirtyTracker({
+        root: recipientSection,
+        onChange: () => updateStickyBar(),
+      });
+    }
+
+    // ============ Sticky bar wire-up ============
+    const stickyBar = document.querySelector<HTMLElement>('[data-sticky-bar="order-edit"]');
+    const stickyCount = document.querySelector<HTMLElement>('[data-sticky-count="order-edit"]');
+    const stickySave = document.querySelector<HTMLButtonElement>(
+      '[data-sticky-save="order-edit"]',
+    );
+    const stickyDiscard = document.querySelector<HTMLButtonElement>(
+      '[data-sticky-discard="order-edit"]',
+    );
+    const stickySaveLabel = document.querySelector<HTMLElement>(
+      '[data-sticky-save-label="order-edit"]',
+    );
+
+    let saving = false;
+
+    function totalDirty(): number {
+      const recipientCount = recipientTracker?.getDirty().count ?? 0;
+      return recipientCount + itemsDirtyCount();
+    }
+
+    function updateStickyBar(): void {
+      if (!stickyBar || !stickyCount) return;
+      const n = totalDirty();
+      stickyCount.textContent = `儲存 ${n} 處變動`;
+      if (n === 0) stickyBar.classList.add("hidden");
+      else stickyBar.classList.remove("hidden");
+    }
+
+    function lockAll(): void {
+      saving = true;
+      recipientTracker?.lock();
+      document.querySelectorAll<HTMLButtonElement>(
+        '#mark-paid, #mark-shipped, #cancel-order, #add-sku-btn',
+      ).forEach((b) => (b.disabled = true));
+      document
+        .querySelectorAll<HTMLInputElement>(".qty-input, [data-remove-sku], #tracking-input, #add-sku-select")
+        .forEach((el) => ((el as HTMLInputElement).disabled = true));
+      if (stickySave) stickySave.disabled = true;
+      if (stickyDiscard) stickyDiscard.disabled = true;
+      if (stickySaveLabel) stickySaveLabel.textContent = "儲存中...";
+    }
+
+    function unlockAll(): void {
+      saving = false;
+      recipientTracker?.unlock();
+      document.querySelectorAll<HTMLButtonElement>(
+        '#mark-paid, #mark-shipped, #cancel-order, #add-sku-btn',
+      ).forEach((b) => (b.disabled = false));
+      document
+        .querySelectorAll<HTMLInputElement>(".qty-input, [data-remove-sku], #tracking-input, #add-sku-select")
+        .forEach((el) => ((el as HTMLInputElement).disabled = false));
+      if (stickySave) stickySave.disabled = false;
+      if (stickyDiscard) stickyDiscard.disabled = false;
+      if (stickySaveLabel) stickySaveLabel.textContent = "儲存";
+    }
+
+    async function doSave(): Promise<void> {
+      if (saving) return;
+      const dirtyN = totalDirty();
+      if (dirtyN === 0) return;
+
+      const payload: Record<string, unknown> = {
+        expected_state: expectedState,
+        idempotency_key: crypto.randomUUID(),
+      };
+      const recipientDirty = recipientTracker?.getDirty();
+      if (recipientDirty?.changed.has("address")) {
+        payload.address = recipientDirty.changed.get("address")!.after as string;
+      }
+      if (recipientDirty?.changed.has("notes")) {
+        payload.notes = recipientDirty.changed.get("notes")!.after as string;
+      }
+      if (itemsEditor && itemsDirtyCount() > 0) {
         if (working.length === 0) {
-          showError("至少要保留一個品項。");
+          showToast("至少要保留一個品項", { kind: "error" });
           return;
         }
-        saveBtn.disabled = true;
-        saveBtn.textContent = "儲存中...";
-        try {
-          const res = await fetch(`/api/admin/orders/${orderId}/items`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify({ items: working }),
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || data.ok === false) {
-            const code = data.error_code || res.status;
-            const sku = data.sold_out_sku ? ` (${data.sold_out_sku})` : "";
-            showError(`儲存失敗：${code}${sku}`);
-            saveBtn.disabled = false;
-            saveBtn.textContent = "儲存品項變更";
-            return;
-          }
-          location.reload();
-        } catch (err) {
-          showError("網路錯誤，請稍後再試。");
-          saveBtn.disabled = false;
-          saveBtn.textContent = "儲存品項變更";
-        }
-      });
+        payload.items = working;
+      }
 
+      lockAll();
+      try {
+        const res = await fetch(`/api/admin/orders/${orderId}/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(payload),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error_code?: string;
+          message?: string;
+          sold_out_sku?: string;
+          current_state?: ExpectedState;
+        };
+        if (res.status === 409 && data.error_code === "STALE_STATE" && data.current_state) {
+          showToast("資料已被其他視窗變更，請重新整理", { kind: "error" });
+          // Update expected state so user can retry after reload
+          expectedState = data.current_state;
+          unlockAll();
+          return;
+        }
+        if (!res.ok || data.ok === false) {
+          const code = data.error_code ?? res.status;
+          const sku = data.sold_out_sku ? `（${data.sold_out_sku}）` : "";
+          showToast(`儲存失敗：${code}${sku}`, { kind: "error" });
+          unlockAll();
+          return;
+        }
+        showToast("已儲存", { kind: "success" });
+        // Local refresh: reload page to pick up new server state.
+        // V6 candidate: in-place re-render from response body. For now reload
+        // is acceptable since we're inside a successful save.
+        location.reload();
+      } catch {
+        showToast("網路錯誤，請稍後再試", { kind: "error" });
+        unlockAll();
+      }
+    }
+
+    async function doDiscard(): Promise<void> {
+      if (saving) return;
+      if (totalDirty() === 0) return;
+      recipientTracker?.discard();
+      working = initialItems.map((i) => ({ ...i }));
       renderSelect();
-      renderRows();
-    })();
+      renderItemsRows();
+      recomputeTotals();
+      updateStickyBar();
+    }
+
+    stickySave?.addEventListener("click", doSave);
+    stickyDiscard?.addEventListener("click", doDiscard);
+
+    document.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (totalDirty() > 0 && !saving) doSave();
+      } else if (e.key === "Escape") {
+        if (totalDirty() > 0 && !saving) doDiscard();
+      }
+    });
+
+    window.addEventListener("beforeunload", (e) => {
+      if (totalDirty() > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
+
+    // ============ Status events (independent of sticky bar) ============
+    async function statusEvent(
+      path: string,
+      body: Record<string, unknown> | null,
+      label: string,
+    ): Promise<void> {
+      lockAll();
+      try {
+        const res = await fetch(`/api/admin/orders/${orderId}${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(body ?? {}),
+        });
+        if (!res.ok) {
+          showToast(`${label}失敗：${res.status}`, { kind: "error" });
+          unlockAll();
+          return;
+        }
+        showToast(`${label}成功`, { kind: "success" });
+        location.reload();
+      } catch {
+        showToast("網路錯誤", { kind: "error" });
+        unlockAll();
+      }
+    }
+
+    document.getElementById("mark-paid")?.addEventListener("click", () => {
+      statusEvent("/mark-paid", null, "標為已付款");
+    });
+    document.getElementById("mark-shipped")?.addEventListener("click", () => {
+      const trackingInput = document.getElementById("tracking-input") as HTMLInputElement | null;
+      const trackingNo = trackingInput?.value.trim() ?? "";
+      statusEvent("/mark-shipped", { tracking_no: trackingNo }, "標為已出貨");
+    });
+
+    // Cancel modal flow
+    const cancelDlg = document.getElementById("cancel-order-modal") as HTMLDialogElement | null;
+    document.getElementById("cancel-order")?.addEventListener("click", () => {
+      cancelDlg?.showModal();
+    });
+    cancelDlg?.querySelector("[data-modal-confirm]")?.addEventListener("click", async () => {
+      cancelDlg.close();
+      lockAll();
+      try {
+        const res = await fetch(`/api/admin/orders/${orderId}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          showToast(`取消失敗：${res.status}`, { kind: "error" });
+          unlockAll();
+          return;
+        }
+        showToast("訂單已取消", { kind: "success" });
+        setTimeout(() => (location.href = "/admin/orders"), 600);
+      } catch {
+        showToast("網路錯誤", { kind: "error" });
+        unlockAll();
+      }
+    });
+
+    // ============ Init ============
+    if (itemsEditor) {
+      renderSelect();
+      renderItemsRows();
+      recomputeTotals();
+    }
+    updateStickyBar();
   </script>
+
+  <script
+    is:inline
+    type="application/json"
+    id="v5-order-state"
+    set:html={JSON.stringify({
+      paid: order.paid,
+      shipped: order.shipped,
+      cancelled_at: order.cancelled_at,
+    })}
+  />
 </Layout>

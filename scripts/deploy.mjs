@@ -19,6 +19,7 @@ const STAGE = {
   ratelimit_kv_id: "3c7807740837434688a43ab8cda83bb8",
   session_kv_id: "fc11f54aa027461d895c35ce6afa0c7d",
   bank_account_display: "808 玉山銀行 / 0901979086154 (STAGE)",
+  allow_test_bypass: "1",
 };
 
 const PROD = {
@@ -59,6 +60,16 @@ wrangler.vars = {
   ...wrangler.vars,
   BANK_ACCOUNT_DISPLAY: cfg.bank_account_display,
 };
+// ALLOW_TEST_BYPASS must be reset on every deploy. dist/server/wrangler.json
+// can carry stale vars from a prior `bun run deploy:stage` (the spread above
+// inherits anything Astro emitted plus any prior patch). Without an explicit
+// delete, a `deploy:stage` followed by `deploy:prod` from the same dist would
+// ship stage's bypass flag to prod, neutering the rate limit on /api/orders.
+if (cfg.allow_test_bypass) {
+  wrangler.vars.ALLOW_TEST_BYPASS = cfg.allow_test_bypass;
+} else {
+  delete wrangler.vars.ALLOW_TEST_BYPASS;
+}
 
 writeFileSync(path, JSON.stringify(wrangler, null, 2));
 console.log(`patched dist/server/wrangler.json → ${target} (worker: ${cfg.name})`);
