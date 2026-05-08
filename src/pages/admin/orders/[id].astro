@@ -300,7 +300,7 @@ const cancelledMeta =
   </Modal>
 
   <script>
-    import { showToast } from "../../../lib/toast";
+    import { showToast, flashToast, consumeFlash } from "../../../lib/toast";
     import { createDirtyTracker, type DirtyState } from "../../../lib/dirty-tracker";
 
     interface ItemWorking {
@@ -605,7 +605,10 @@ const cancelledMeta =
           unlockAll();
           return;
         }
-        showToast("已儲存", { kind: "success" });
+        // flashToast (vs showToast) writes to sessionStorage so the message
+        // survives the reload below — otherwise the toast is wiped before the
+        // user can see it.
+        flashToast("已儲存", { kind: "success" });
         // Local refresh: reload page to pick up new server state.
         // V6 candidate: in-place re-render from response body. For now reload
         // is acceptable since we're inside a successful save.
@@ -665,7 +668,7 @@ const cancelledMeta =
           unlockAll();
           return;
         }
-        showToast(`${label}成功`, { kind: "success" });
+        flashToast(`${label}成功`, { kind: "success" });
         location.reload();
       } catch {
         showToast("網路錯誤", { kind: "error" });
@@ -716,6 +719,8 @@ const cancelledMeta =
       recomputeTotals();
     }
     updateStickyBar();
+    // Surface any toast queued by the previous page (post-save reload).
+    consumeFlash();
   </script>
 
   <script
