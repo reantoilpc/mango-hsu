@@ -59,8 +59,17 @@ wrangler.kv_namespaces = [
 wrangler.vars = {
   ...wrangler.vars,
   BANK_ACCOUNT_DISPLAY: cfg.bank_account_display,
-  ...(cfg.allow_test_bypass ? { ALLOW_TEST_BYPASS: cfg.allow_test_bypass } : {}),
 };
+// ALLOW_TEST_BYPASS must be reset on every deploy. dist/server/wrangler.json
+// can carry stale vars from a prior `bun run deploy:stage` (the spread above
+// inherits anything Astro emitted plus any prior patch). Without an explicit
+// delete, a `deploy:stage` followed by `deploy:prod` from the same dist would
+// ship stage's bypass flag to prod, neutering the rate limit on /api/orders.
+if (cfg.allow_test_bypass) {
+  wrangler.vars.ALLOW_TEST_BYPASS = cfg.allow_test_bypass;
+} else {
+  delete wrangler.vars.ALLOW_TEST_BYPASS;
+}
 
 writeFileSync(path, JSON.stringify(wrangler, null, 2));
 console.log(`patched dist/server/wrangler.json → ${target} (worker: ${cfg.name})`);

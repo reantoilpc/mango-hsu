@@ -198,11 +198,16 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     if (r.stock && r.stock.new_stock !== ex.stock) {
+      // CAS on `stock = ex.stock` to close the precheck→write race window
+      // (Codex finding #5). If a customer order or another admin write changed
+      // stock between the unshipped_total precheck above and this UPDATE, the
+      // WHERE matches 0 rows and the post-batch meta.changes verifier below
+      // returns BATCH_PARTIAL_FAILURE. Operator sees the error, reloads, and
+      // re-issues against fresh state instead of blindly overwriting.
       batch.push(
-        env.DB.prepare(`UPDATE products SET stock = ? WHERE sku = ?`).bind(
-          r.stock.new_stock,
-          r.sku,
-        ),
+        env.DB.prepare(
+          `UPDATE products SET stock = ? WHERE sku = ? AND stock = ?`,
+        ).bind(r.stock.new_stock, r.sku, ex.stock),
       );
       auditDetails.stock = {
         from: ex.stock,
