@@ -9,6 +9,7 @@ import {
   stockRestoreStmts,
 } from "../../../../../lib/stock";
 import { shippingFor } from "../../../../../lib/order-response";
+import { itemsHash } from "../../../../../lib/items-hash";
 import { env } from "../../../../../lib/env";
 
 // V5 sticky-save endpoint: single打點 for editable fields on the order detail
@@ -44,6 +45,12 @@ interface SaveRequest {
     paid: boolean;
     shipped: boolean;
     cancelled_at: string | null;
+    // Optional canonical hash of the items at the time the client loaded the
+    // page (computed via lib/items-hash#itemsHash). When present, server gates
+    // any edit on it matching the current order_items — closes the two-tab
+    // concurrent-items-edit race that paid/shipped/cancelled alone cannot
+    // detect. Optional for legacy compatibility; clients SHOULD always send.
+    items_hash?: string;
   };
   idempotency_key?: string;
 }
@@ -79,35 +86,36 @@ export const POST: APIRoute = async ({ request, params }) => {
 
   const db = makeDb(env);
 
-  // Step 1: Idempotency replay check.
+  // Step 1: Idempotency replay check — scan the last N audit rows (not just the
+  // latest) so an interleaved status event (mark_paid / mark_shipped / cancel)
+  // between a save and its retry doesn't make the retry miss the cache and
+  // re-execute the mutation. 10 rows covers any realistic interleave depth
+  // within the 60s window.
   if (idempotencyKey) {
     const recent = await db
       .select()
       .from(audit_log)
       .where(eq(audit_log.order_id, id))
       .orderBy(desc(audit_log.ts))
-      .limit(1);
-    const last = recent[0];
-    if (last && last.details) {
+      .limit(10);
+    for (const row of recent) {
+      if (!row.details) continue;
       try {
-        const parsed = JSON.parse(last.details) as { idempotency_key?: string };
-        const lastTs = Date.parse(last.ts);
-        if (
-          parsed.idempotency_key === idempotencyKey &&
-          Number.isFinite(lastTs) &&
-          Date.now() - lastTs < IDEMPOTENCY_WINDOW_MS
-        ) {
+        const parsed = JSON.parse(row.details) as { idempotency_key?: string };
+        if (parsed.idempotency_key !== idempotencyKey) continue;
+        const rowTs = Date.parse(row.ts);
+        if (Number.isFinite(rowTs) && Date.now() - rowTs < IDEMPOTENCY_WINDOW_MS) {
           // Replay: caller's previous request already applied. Return current
           // order state without re-running the mutation.
           return json(await loadOrderJson(db, id));
         }
       } catch {
-        /* malformed details JSON — ignore, proceed with normal save */
+        /* malformed details JSON — keep scanning */
       }
     }
   }
 
-  // Step 2: Read current order + validate expected_state.
+  // Step 2: Read current order + items + validate expected_state.
   const orderRows = await db
     .select()
     .from(orders)
@@ -116,19 +124,34 @@ export const POST: APIRoute = async ({ request, params }) => {
   const order = orderRows[0];
   if (!order) return text("not_found", 404);
 
-  if (
+  const currentItems = await db
+    .select()
+    .from(order_items)
+    .where(eq(order_items.order_id, id));
+  const currentItemsHash = itemsHash(currentItems);
+
+  const stateStale =
     order.paid !== body.expected_state.paid ||
     order.shipped !== body.expected_state.shipped ||
-    order.cancelled_at !== body.expected_state.cancelled_at
-  ) {
+    order.cancelled_at !== body.expected_state.cancelled_at;
+  // items_hash is optional — only gate when client sent one. Legacy clients
+  // that don't compute the hash fall through to last-write-wins behavior
+  // (documented limitation pre-V5.1).
+  const itemsStale =
+    typeof body.expected_state.items_hash === "string" &&
+    body.expected_state.items_hash !== currentItemsHash;
+
+  if (stateStale || itemsStale) {
     return json(
       {
         ok: false,
         error_code: "STALE_STATE",
+        stale_reason: itemsStale && !stateStale ? "items" : stateStale && itemsStale ? "both" : "status",
         current_state: {
           paid: order.paid,
           shipped: order.shipped,
           cancelled_at: order.cancelled_at,
+          items_hash: currentItemsHash,
         },
         current_order: await loadOrderJson(db, id),
       },
@@ -383,6 +406,9 @@ interface OrderJson {
   ok: true;
   order: typeof orders.$inferSelect;
   items: Array<typeof order_items.$inferSelect>;
+  // Latest audit rows so the client can append the new row to 變更歷史
+  // without doing a full page reload.
+  audit_log: Array<typeof audit_log.$inferSelect>;
 }
 
 async function loadOrderJson(
@@ -398,5 +424,11 @@ async function loadOrderJson(
     .select()
     .from(order_items)
     .where(eq(order_items.order_id, id));
-  return { ok: true, order: o[0]!, items: its };
+  const al = await db
+    .select()
+    .from(audit_log)
+    .where(eq(audit_log.order_id, id))
+    .orderBy(desc(audit_log.ts))
+    .limit(50);
+  return { ok: true, order: o[0]!, items: its, audit_log: al };
 }

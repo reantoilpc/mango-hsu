@@ -13,14 +13,47 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
   const id = params.id;
   if (!id || !/^M-\d{8}-\d{3}$/.test(id)) return text("bad id", 400);
 
-  let body: { tracking_no?: string } = {};
+  let body: {
+    tracking_no?: string;
+    expected_state?: { paid: boolean; shipped: boolean; cancelled_at: string | null };
+  } = {};
   try {
-    body = (await request.json()) as { tracking_no?: string };
+    body = (await request.json()) as typeof body;
   } catch {
     /* empty body OK */
   }
   const trackingNo = (body.tracking_no ?? "").trim();
   if (trackingNo.length > 100) return text("tracking too long", 400);
+
+  // Optional expected_state gate.
+  if (body.expected_state) {
+    const dbCheck = makeDb(env);
+    const cur = await dbCheck
+      .select()
+      .from(orders)
+      .where(eq(orders.order_id, id))
+      .limit(1);
+    const o = cur[0];
+    if (!o) return text("not_found", 404);
+    if (
+      o.paid !== body.expected_state.paid ||
+      o.shipped !== body.expected_state.shipped ||
+      o.cancelled_at !== body.expected_state.cancelled_at
+    ) {
+      return json(
+        {
+          ok: false,
+          error_code: "STALE_STATE",
+          current_state: {
+            paid: o.paid,
+            shipped: o.shipped,
+            cancelled_at: o.cancelled_at,
+          },
+        },
+        409,
+      );
+    }
+  }
 
   // V4: cancelled_at IS NULL guards against marking a cancelled order shipped
   // (whose stock has been restored).

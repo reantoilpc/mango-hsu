@@ -126,7 +126,7 @@ const cancelledMeta =
     </section>
 
     <section class="mb-6 rounded border border-gray-200 p-4">
-      <h2 class="mb-3 text-lg font-bold">品項 ({itemsToReadable(items)})</h2>
+      <h2 class="mb-3 text-lg font-bold" id="items-title">品項 ({itemsToReadable(items)})</h2>
 
       {itemsEditable && isAdmin ? (
         <div
@@ -302,6 +302,8 @@ const cancelledMeta =
   <script>
     import { showToast, flashToast, consumeFlash } from "../../../lib/toast";
     import { createDirtyTracker, type DirtyState } from "../../../lib/dirty-tracker";
+    import { itemsHash } from "../../../lib/items-hash";
+    import { formatTaipei } from "../../../lib/formatters";
 
     interface ItemWorking {
       sku: string;
@@ -318,6 +320,7 @@ const cancelledMeta =
       paid: boolean;
       shipped: boolean;
       cancelled_at: string | null;
+      items_hash?: string;
     }
 
     const main = document.querySelector("main")!;
@@ -348,6 +351,10 @@ const cancelledMeta =
       paid: stateIsland.paid,
       shipped: stateIsland.shipped,
       cancelled_at: stateIsland.cancelled_at,
+      // Items fingerprint at page-load. Sent with every /save so the server
+      // can detect another tab modifying items between this page-load and
+      // submit (the "double-decrement" race).
+      items_hash: itemsHash(initialItems),
     };
     const freeShippingMinPackages = stateIsland.freeShippingMinPackages ?? 10;
     const shippingFeeTwd = stateIsland.shippingFeeTwd ?? 80;
@@ -605,14 +612,17 @@ const cancelledMeta =
           unlockAll();
           return;
         }
-        // flashToast (vs showToast) writes to sessionStorage so the message
-        // survives the reload below — otherwise the toast is wiped before the
-        // user can see it.
-        flashToast("已儲存", { kind: "success" });
-        // Local refresh: reload page to pick up new server state.
-        // V6 candidate: in-place re-render from response body. For now reload
-        // is acceptable since we're inside a successful save.
-        location.reload();
+        // Local DOM update — no reload, no white flash. Server response has
+        // the new authoritative order/items/audit state.
+        applyServerState(
+          data as unknown as {
+            order: Record<string, unknown>;
+            items: Array<{ sku: string; qty: number; unit_price: number }>;
+            audit_log: Array<{ ts: string; user_email: string; action: string; details: string | null }>;
+          },
+        );
+        showToast("已儲存", { kind: "success" });
+        unlockAll();
       } catch {
         showToast("網路錯誤，請稍後再試", { kind: "error" });
         unlockAll();
@@ -627,6 +637,104 @@ const cancelledMeta =
       renderSelect();
       renderItemsRows();
       recomputeTotals();
+      updateStickyBar();
+    }
+
+    // Apply server response after a successful save so the page reflects DB
+    // state without a full reload. Replaces the old location.reload() — saves
+    // the round-trip cost AND lets the success toast stay visible.
+    function applyServerState(data: {
+      order: Record<string, unknown>;
+      items: Array<{ sku: string; qty: number; unit_price: number }>;
+      audit_log: Array<{ ts: string; user_email: string; action: string; details: string | null }>;
+    }): void {
+      const ord = data.order;
+      // 1) Address/notes — sync to server-normalized value (may have trimmed
+      //    whitespace etc). Use textContent? No — these are <textarea>/<input>.
+      const addrEl = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+        '[data-dirty-key="address"]',
+      );
+      if (addrEl && typeof ord.address === "string") addrEl.value = ord.address;
+      const notesEl = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+        '[data-dirty-key="notes"]',
+      );
+      if (notesEl) notesEl.value = typeof ord.notes === "string" ? ord.notes : "";
+
+      // 2) Items — update working[] + initialItems and re-render
+      const newItems = data.items.map((i) => ({ sku: i.sku, qty: i.qty }));
+      initialItems.length = 0;
+      initialItems.push(...newItems);
+      working = newItems.map((i) => ({ ...i }));
+      if (itemsEditor) {
+        renderSelect();
+        renderItemsRows();
+      }
+
+      // 3) Items title (the "(芒果 ×N)" summary in the H2)
+      const titleEl = document.getElementById("items-title");
+      if (titleEl) {
+        const readable = newItems.length === 0
+          ? "(無品項)"
+          : newItems
+              .map((i) => {
+                const p = productMap.get(i.sku);
+                const label = p ? `${p.name}${p.variant}` : i.sku;
+                return `${label} ×${i.qty}`;
+              })
+              .join("、");
+        titleEl.textContent = `品項 (${readable})`;
+      }
+
+      // 4) Totals from server (authoritative)
+      const subEl = document.getElementById("items-subtotal");
+      const shipEl = document.getElementById("items-shipping");
+      const totEl = document.getElementById("items-total");
+      if (subEl && typeof ord.subtotal === "number") subEl.textContent = "$" + ord.subtotal;
+      if (shipEl && typeof ord.shipping === "number") shipEl.textContent = "$" + ord.shipping;
+      if (totEl && typeof ord.total === "number") totEl.textContent = "$" + ord.total;
+
+      // 5) Reset dirty tracker baseline to the new server values
+      recipientTracker?.clear();
+
+      // 6) Update expected_state items_hash so the next save can race-detect
+      expectedState.items_hash = itemsHash(newItems);
+
+      // 7) Audit list — full replace using the rows server sent
+      const auditList = document.getElementById("audit-list");
+      if (auditList) {
+        auditList.innerHTML = "";
+        for (const a of data.audit_log) {
+          const li = document.createElement("li");
+          li.className = "border-l-2 border-gray-200 pl-3";
+          const tsDiv = document.createElement("div");
+          tsDiv.className = "font-mono text-gray-500";
+          tsDiv.textContent = formatTaipei(a.ts);
+          const bodyDiv = document.createElement("div");
+          const userSpan = document.createElement("span");
+          userSpan.className = "font-medium";
+          userSpan.textContent = a.user_email;
+          bodyDiv.appendChild(userSpan);
+          bodyDiv.appendChild(document.createTextNode(` ／ ${a.action}`));
+          if (a.details) {
+            const detSpan = document.createElement("span");
+            detSpan.className = "text-gray-500";
+            detSpan.textContent = ` (${a.details})`;
+            bodyDiv.appendChild(detSpan);
+          }
+          li.appendChild(tsDiv);
+          li.appendChild(bodyDiv);
+          auditList.appendChild(li);
+        }
+        if (data.audit_log.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "text-sm text-gray-500";
+          empty.dataset.empty = "";
+          empty.textContent = "（尚無紀錄）";
+          auditList.appendChild(empty);
+        }
+      }
+
+      // 8) Sticky bar should disappear (clean state)
       updateStickyBar();
     }
 
@@ -650,9 +758,23 @@ const cancelledMeta =
     });
 
     // ============ Status events (independent of sticky bar) ============
+    function statusBody(extra: Record<string, unknown> = {}): Record<string, unknown> {
+      // Status events send expected_state for early stale detection. Server
+      // SQL guards still enforce data correctness — this just lets server
+      // return a clear STALE_STATE error before doing any work.
+      return {
+        expected_state: {
+          paid: expectedState.paid,
+          shipped: expectedState.shipped,
+          cancelled_at: expectedState.cancelled_at,
+        },
+        ...extra,
+      };
+    }
+
     async function statusEvent(
       path: string,
-      body: Record<string, unknown> | null,
+      extra: Record<string, unknown>,
       label: string,
     ): Promise<void> {
       lockAll();
@@ -661,8 +783,17 @@ const cancelledMeta =
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify(body ?? {}),
+          body: JSON.stringify(statusBody(extra)),
         });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error_code?: string;
+        };
+        if (res.status === 409 && data.error_code === "STALE_STATE") {
+          showToast("訂單狀態已被其他視窗變更，請重新整理", { kind: "error" });
+          unlockAll();
+          return;
+        }
         if (!res.ok) {
           showToast(`${label}失敗：${res.status}`, { kind: "error" });
           unlockAll();
@@ -677,7 +808,7 @@ const cancelledMeta =
     }
 
     document.getElementById("mark-paid")?.addEventListener("click", () => {
-      statusEvent("/mark-paid", null, "標為已付款");
+      statusEvent("/mark-paid", {}, "標為已付款");
     });
     document.getElementById("mark-shipped")?.addEventListener("click", () => {
       const trackingInput = document.getElementById("tracking-input") as HTMLInputElement | null;
@@ -698,7 +829,17 @@ const cancelledMeta =
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
+          body: JSON.stringify(statusBody()),
         });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error_code?: string;
+        };
+        if (res.status === 409 && data.error_code === "STALE_STATE") {
+          showToast("訂單狀態已被其他視窗變更，請重新整理", { kind: "error" });
+          unlockAll();
+          return;
+        }
         if (!res.ok) {
           showToast(`取消失敗：${res.status}`, { kind: "error" });
           unlockAll();
