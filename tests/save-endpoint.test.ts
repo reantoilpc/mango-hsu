@@ -62,7 +62,12 @@ interface SavePayload {
   items?: Array<{ sku: string; qty: number }>;
   address?: string;
   notes?: string;
-  expected_state: { paid: boolean; shipped: boolean; cancelled_at: string | null };
+  expected_state: {
+    paid: boolean;
+    shipped: boolean;
+    cancelled_at: string | null;
+    items_hash?: string;
+  };
   idempotency_key?: string;
 }
 
@@ -232,6 +237,46 @@ describe("V5 /save endpoint", () => {
     expect(res.status).toBe(200);
     expect(getSkuStock(TEST_SKU_A)).toBe(3);
     expect(getSkuStock(TEST_SKU_B)).toBe(4);
+  });
+
+  it("stale items_hash returns 409 STALE_STATE (concurrent-edit race detection)", async () => {
+    if (SKIP) return;
+    seedSku(TEST_SKU_A, { stock: 5 });
+    const cookie = createTestAdminSession();
+    const orderId = await placeCustomerOrder(TEST_SKU_A, 2);
+
+    // Tab A loads the page, sees items=[{sku, qty:2}], computes hash.
+    const staleHash = `${TEST_SKU_A}:2`;
+
+    // Tab B saves first, changing qty 2→3 — current items now [{sku, qty:3}].
+    const r1 = await adminSave(cookie, orderId, {
+      items: [{ sku: TEST_SKU_A, qty: 3 }],
+      expected_state: { paid: false, shipped: false, cancelled_at: null },
+    });
+    expect(r1.status).toBe(200);
+
+    // Tab A submits with its stale hash — server rejects.
+    const r2 = await adminSave(cookie, orderId, {
+      items: [{ sku: TEST_SKU_A, qty: 4 }],
+      expected_state: {
+        paid: false,
+        shipped: false,
+        cancelled_at: null,
+        items_hash: staleHash,
+      },
+    });
+    expect(r2.status).toBe(409);
+    const body = (await r2.json()) as {
+      error_code: string;
+      stale_reason: string;
+      current_state: { items_hash: string };
+    };
+    expect(body.error_code).toBe("STALE_STATE");
+    expect(body.stale_reason).toBe("items");
+    expect(body.current_state.items_hash).toBe(`${TEST_SKU_A}:3`);
+
+    // Stock should have decremented exactly once (5 → 3 from r1, not again).
+    expect(getSkuStock(TEST_SKU_A)).toBe(2);
   });
 
   it("expected_state shape required (400 if malformed)", async () => {

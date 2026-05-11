@@ -37,6 +37,44 @@ export const POST: APIRoute = async ({ request, params }) => {
   const id = params.id;
   if (!id || !/^M-\d{8}-\d{3}$/.test(id)) return text("bad id", 400);
 
+  let body: {
+    expected_state?: { paid: boolean; shipped: boolean; cancelled_at: string | null };
+  } = {};
+  try {
+    const raw = await request.text();
+    if (raw.trim()) body = JSON.parse(raw);
+  } catch {
+    /* empty body OK — legacy clients */
+  }
+
+  // Optional expected_state gate. cancel.ts's atomic UPDATE already enforces
+  // the right preconditions, but expected_state lets us return a clearer
+  // STALE_STATE error before doing any work, so the client knows to refresh.
+  if (body.expected_state) {
+    const db = makeDb(env);
+    const cur = await db.select().from(orders).where(eq(orders.order_id, id)).limit(1);
+    const o = cur[0];
+    if (!o) return text("not_found", 404);
+    if (
+      o.paid !== body.expected_state.paid ||
+      o.shipped !== body.expected_state.shipped ||
+      o.cancelled_at !== body.expected_state.cancelled_at
+    ) {
+      return json(
+        {
+          ok: false,
+          error_code: "STALE_STATE",
+          current_state: {
+            paid: o.paid,
+            shipped: o.shipped,
+            cancelled_at: o.cancelled_at,
+          },
+        },
+        409,
+      );
+    }
+  }
+
   const now = new Date().toISOString();
 
   // Step 1: atomic gate — only the first concurrent request gets changes=1.
