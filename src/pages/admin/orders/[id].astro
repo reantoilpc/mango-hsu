@@ -300,7 +300,7 @@ const cancelledMeta =
   </Modal>
 
   <script>
-    import { showToast } from "../../../lib/toast";
+    import { showToast, flashToast, consumeFlash } from "../../../lib/toast";
     import { createDirtyTracker, type DirtyState } from "../../../lib/dirty-tracker";
 
     interface ItemWorking {
@@ -335,11 +335,22 @@ const cancelledMeta =
       : [];
     const productMap = new Map(productsList.map((p) => [p.sku, p]));
 
-    // expected_state baked from SSR via JSON island.
+    // expected_state + shipping config baked from SSR via JSON island.
+    interface OrderStateIsland extends ExpectedState {
+      freeShippingMinPackages?: number;
+      shippingFeeTwd?: number;
+    }
     const stateNode = document.getElementById("v5-order-state");
-    let expectedState: ExpectedState = stateNode
+    const stateIsland: OrderStateIsland = stateNode
       ? JSON.parse(stateNode.textContent || "{}")
       : { paid: false, shipped: false, cancelled_at: null };
+    let expectedState: ExpectedState = {
+      paid: stateIsland.paid,
+      shipped: stateIsland.shipped,
+      cancelled_at: stateIsland.cancelled_at,
+    };
+    const freeShippingMinPackages = stateIsland.freeShippingMinPackages ?? 10;
+    const shippingFeeTwd = stateIsland.shippingFeeTwd ?? 80;
 
     // ============ Items working state ============
     let working: ItemWorking[] = initialItems.map((i) => ({ ...i }));
@@ -359,34 +370,27 @@ const cancelledMeta =
     }
 
     function recomputeTotals(): void {
+      // Skip when items are clean: SSR already rendered server-truthful totals.
+      // Recomputing here would stomp the DB-correct shipping/total with a preview
+      // that mirrors the server formula but rounds differently if env values
+      // ever drift.
+      if (itemsDirtyCount() === 0) return;
       let subtotal = 0;
+      let totalQty = 0;
       for (const w of working) {
         const p = productMap.get(w.sku);
         if (p) subtotal += p.price * w.qty;
+        totalQty += w.qty;
       }
-      // V4 shipping rule: family-runbook says flat 160 if subtotal < 1000, else free.
-      // Use server computation by sending a dry-run; simpler: just match existing rule.
-      // Match server's shippingFor — read from initial DOM if available.
-      const initSubtotal = parseInt(
-        document.getElementById("items-subtotal")?.textContent?.replace(/[^0-9]/g, "") || "0",
-        10,
-      );
-      const initShipping = parseInt(
-        document.getElementById("items-shipping")?.textContent?.replace(/[^0-9]/g, "") || "0",
-        10,
-      );
-      // If subtotal change crosses the free-shipping threshold we'll let the server
-      // recompute on save. For preview, recompute simply: if subtotal >= 1000 free
-      // else 160. (Mirrors src/lib/order-response.ts shippingFor — adjust if rule changes.)
-      const shipping = subtotal >= 1000 ? 0 : initShipping > 0 ? initShipping : 160;
+      // Mirrors src/lib/order-response.ts shippingFor — qty-based, NOT subtotal.
+      // Server is authoritative; this is just a preview for the dirty state.
+      const shipping = totalQty >= freeShippingMinPackages ? 0 : shippingFeeTwd;
       const subEl = document.getElementById("items-subtotal");
       const shipEl = document.getElementById("items-shipping");
       const totEl = document.getElementById("items-total");
       if (subEl) subEl.textContent = "$" + subtotal;
       if (shipEl) shipEl.textContent = "$" + shipping;
       if (totEl) totEl.textContent = "$" + (subtotal + shipping);
-      // Suppress unused warning
-      void initSubtotal;
     }
 
     function renderSelect(): void {
@@ -601,7 +605,10 @@ const cancelledMeta =
           unlockAll();
           return;
         }
-        showToast("已儲存", { kind: "success" });
+        // flashToast (vs showToast) writes to sessionStorage so the message
+        // survives the reload below — otherwise the toast is wiped before the
+        // user can see it.
+        flashToast("已儲存", { kind: "success" });
         // Local refresh: reload page to pick up new server state.
         // V6 candidate: in-place re-render from response body. For now reload
         // is acceptable since we're inside a successful save.
@@ -661,7 +668,7 @@ const cancelledMeta =
           unlockAll();
           return;
         }
-        showToast(`${label}成功`, { kind: "success" });
+        flashToast(`${label}成功`, { kind: "success" });
         location.reload();
       } catch {
         showToast("網路錯誤", { kind: "error" });
@@ -712,6 +719,8 @@ const cancelledMeta =
       recomputeTotals();
     }
     updateStickyBar();
+    // Surface any toast queued by the previous page (post-save reload).
+    consumeFlash();
   </script>
 
   <script
@@ -722,6 +731,8 @@ const cancelledMeta =
       paid: order.paid,
       shipped: order.shipped,
       cancelled_at: order.cancelled_at,
+      freeShippingMinPackages: parseInt(env.FREE_SHIPPING_MIN_PACKAGES, 10) || 10,
+      shippingFeeTwd: parseInt(env.SHIPPING_FEE_TWD, 10) || 80,
     })}
   />
 </Layout>

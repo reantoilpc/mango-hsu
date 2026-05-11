@@ -10,7 +10,11 @@
 //   - lock() / unlock(): disable / enable all tracked fields (used during save / status events)
 //   - destroy(): remove listeners
 //
-// Field key resolution (in order): data-dirty-key, name, id.
+// Field key requirement: every tracked field MUST have an explicit
+// `data-dirty-key`. Fields without it are skipped — this avoids name-collision
+// bugs where two inputs share `name="new_stock"` and overwrite each other in
+// the initial-values map (caused a false-positive dirty count of 1 on first
+// load of /admin/products because the stock-adjust panel inputs collided).
 
 export type FieldValue = string | number | boolean;
 
@@ -65,8 +69,8 @@ function writeField(el: TrackedField, val: FieldValue): void {
   el.value = String(val);
 }
 
-function fieldKey(el: TrackedField, idx: number): string {
-  return el.dataset.dirtyKey ?? el.name ?? el.id ?? `__f${idx}`;
+function fieldKey(el: TrackedField): string {
+  return el.dataset.dirtyKey!;
 }
 
 export function createDirtyTracker(opts: DirtyTrackerOptions): DirtyTracker {
@@ -74,17 +78,17 @@ export function createDirtyTracker(opts: DirtyTrackerOptions): DirtyTracker {
 
   const fields: TrackedField[] = Array.from(
     root.querySelectorAll<HTMLElement>(
-      "[data-dirty-track] input, [data-dirty-track] select, [data-dirty-track] textarea",
+      "input[data-dirty-key], select[data-dirty-key], textarea[data-dirty-key]",
     ),
   ).filter(isTrackedField);
 
   const initial = new Map<string, FieldValue>();
-  fields.forEach((f, i) => initial.set(fieldKey(f, i), readField(f)));
+  fields.forEach((f) => initial.set(fieldKey(f), readField(f)));
 
   function compute(): DirtyState {
     const changed = new Map<string, DirtyChange>();
-    fields.forEach((f, i) => {
-      const k = fieldKey(f, i);
+    fields.forEach((f) => {
+      const k = fieldKey(f);
       const before = initial.get(k);
       const after = readField(f);
       if (before !== after) {
@@ -107,12 +111,12 @@ export function createDirtyTracker(opts: DirtyTrackerOptions): DirtyTracker {
   return {
     getDirty: compute,
     clear() {
-      fields.forEach((f, i) => initial.set(fieldKey(f, i), readField(f)));
+      fields.forEach((f) => initial.set(fieldKey(f), readField(f)));
       emit();
     },
     discard() {
-      fields.forEach((f, i) => {
-        const v = initial.get(fieldKey(f, i));
+      fields.forEach((f) => {
+        const v = initial.get(fieldKey(f));
         if (v !== undefined) writeField(f, v);
       });
       emit();

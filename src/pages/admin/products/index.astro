@@ -191,7 +191,7 @@ const productRows = await db
   <StickyBar scopeId="products-list" />
 
   <script>
-    import { showToast } from "../../../lib/toast";
+    import { showToast, flashToast, consumeFlash } from "../../../lib/toast";
     import { createDirtyTracker } from "../../../lib/dirty-tracker";
 
     interface ProductFieldsPayload {
@@ -316,7 +316,7 @@ const productRows = await db
           unlockAll();
           return;
         }
-        showToast(`已儲存 ${rows.length} 行變動`, { kind: "success" });
+        flashToast(`已儲存 ${rows.length} 行變動`, { kind: "success" });
         location.reload();
       } catch {
         showToast("網路錯誤，請稍後再試", { kind: "error" });
@@ -399,8 +399,8 @@ const productRows = await db
             current_stock?: number;
           };
           if (res.ok && data.ok) {
-            showToast(`${sku} 庫存已更新`, { kind: "success" });
-            setTimeout(() => location.reload(), 400);
+            flashToast(`${sku} 庫存已更新`, { kind: "success" });
+            location.reload();
             return;
           }
           if (data.error_code === "STOCK_BELOW_UNSHIPPED" && !override) {
@@ -474,13 +474,15 @@ const productRows = await db
         body: JSON.stringify(data),
       });
       if (res.ok) {
-        showToast("已新增商品", { kind: "success" });
-        setTimeout(() => location.reload(), 400);
+        flashToast("已新增商品", { kind: "success" });
+        location.reload();
       } else {
         showToast(`新增失敗：${await res.text()}`, { kind: "error" });
       }
     });
 
     updateStickyBar();
+    // Surface any toast queued by the previous page (post-save reload).
+    consumeFlash();
   </script>
 </Layout>

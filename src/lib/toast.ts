@@ -88,3 +88,42 @@ export function showToast(message: string, opts: ToastOptions = {}): () => void 
 export function clearToasts(): void {
   if (containerEl) containerEl.innerHTML = "";
 }
+
+// Flash toast across `location.reload()`. Pages that reload after a successful
+// mutation (legacy V5 pattern; pre-local-DOM-update) call flashToast(...) right
+// before reload; the next page load calls consumeFlash() during init to surface
+// the message. Without this the toast is wiped by reload before the user can
+// read it.
+const FLASH_KEY = "mh_flash_toast";
+
+export function flashToast(message: string, opts: ToastOptions = {}): void {
+  try {
+    sessionStorage.setItem(
+      FLASH_KEY,
+      JSON.stringify({ message, kind: opts.kind ?? "success", duration: opts.duration }),
+    );
+  } catch {
+    // sessionStorage unavailable (private mode etc) — no-op, toast just lost
+  }
+}
+
+export function consumeFlash(): void {
+  let raw: string | null = null;
+  try {
+    raw = sessionStorage.getItem(FLASH_KEY);
+    if (raw) sessionStorage.removeItem(FLASH_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw) as {
+      message: string;
+      kind?: ToastKind;
+      duration?: number;
+    };
+    showToast(parsed.message, { kind: parsed.kind, duration: parsed.duration });
+  } catch {
+    // bad JSON, ignore
+  }
+}
