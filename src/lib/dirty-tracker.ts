@@ -44,7 +44,13 @@ export interface DirtyTracker {
 
 type TrackedField = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
-function isTrackedField(el: Element): el is TrackedField {
+// Cannot use a typed predicate `el is TrackedField` because TS2677 fires:
+// HTMLSelectElement adds a `remove(index: number)` overload that TypeScript considers
+// incompatible with `Element.remove()` (and HTMLElement.remove()) for variance checks
+// even when the parameter is HTMLElement. Workaround: runtime instanceof check + explicit
+// `as TrackedField[]` cast on the filter result. The instanceof guarantees the cast is
+// sound at runtime.
+function isTrackedFieldRuntime(el: unknown): boolean {
   return (
     el instanceof HTMLInputElement ||
     el instanceof HTMLSelectElement ||
@@ -76,11 +82,11 @@ function fieldKey(el: TrackedField): string {
 export function createDirtyTracker(opts: DirtyTrackerOptions): DirtyTracker {
   const { root, onChange } = opts;
 
-  const fields: TrackedField[] = Array.from(
+  const fields = Array.from(
     root.querySelectorAll<HTMLElement>(
       "input[data-dirty-key], select[data-dirty-key], textarea[data-dirty-key]",
     ),
-  ).filter(isTrackedField);
+  ).filter(isTrackedFieldRuntime) as TrackedField[];
 
   const initial = new Map<string, FieldValue>();
   fields.forEach((f) => initial.set(fieldKey(f), readField(f)));

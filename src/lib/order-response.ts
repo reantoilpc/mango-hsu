@@ -22,12 +22,21 @@ export type OrderErrorCode =
   | "SOLD_OUT"
   | "SEASON_CLOSED"
   | "INVALID_INPUT"
-  | "INTERNAL";
+  | "INTERNAL"
+  // V5.2: customer cart points at a SKU not in the active season (could be archived,
+  // could be a typo). Same response from the HTTP perspective whether the SKU once
+  // existed or never did — don't leak season state.
+  | "unknown_product";
 
 export interface OrderError {
   ok: false;
   error_code: OrderErrorCode;
-  sold_out_sku?: string;
+  // V5.2: SOLD_OUT now reports group_id (the pool that ran dry) instead of sku.
+  // Group can have multiple SKUs (1斤 + 半斤 of same flavour); naming the group is
+  // truthful — the customer can pick a different flavour.
+  sold_out_group_id?: number;
+  // V5.2 unknown_product: the offending sku (for client UI to highlight which row to remove)
+  sku?: string;
   message?: string;
 }
 

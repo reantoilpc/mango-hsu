@@ -1,20 +1,77 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Time convention:
 // - All timestamp columns store UTC ISO-8601 with 'Z' suffix (e.g. "2026-04-26T14:38:27.123Z").
 // - `order_id` uses Asia/Taipei calendar day for `M-YYYYMMDD-NNN` (preserves V1 behavior).
+//
+// V5.2 stock model:
+// - Stock is owned at the product_group level (e.g. 金煌芒果乾, 愛文芒果乾) as INTEGER `fen`
+//   (1 fen = 1/100 斤). Avoids D1 SQLite REAL math.
+// - Each product (SKU) declares a fixed `package_fen` (1斤=100, 半斤=50, 10斤=1000).
+// - Order decrement subtracts `sku.package_fen × qty` from the product_group pool via the
+//   V4-style atomic CAS pattern (see src/lib/stock.ts).
+// - Per-SKU available count is derived: floor(group.stock_fen / sku.package_fen). Never stored.
+//
+// V5.2 seasonal catalog:
+// - Each annual production season is one `seasons` row. product_groups + products + orders +
+//   audit_log all carry season_id. Cross-year SKU strings can repeat (unique(season_id, sku))
+//   with different prices.
+// - At most one season can be `status='active'` at any time (enforced by partial unique index).
 
-export const products = sqliteTable("products", {
-  sku: text("sku").primaryKey(),
-  name: text("name").notNull(),
-  variant: text("variant").notNull(),
-  price: integer("price").notNull(), // TWD, integer
-  available: integer("available", { mode: "boolean" }).notNull().default(true),
-  // V4: integer stock count. atomic decrement via SQL UPDATE ... WHERE stock >= qty.
-  // available=false hides SKU regardless of stock; available=true && stock=0 = "售完".
-  stock: integer("stock").notNull().default(0),
-  display_order: integer("display_order").notNull().default(0),
+export const seasons = sqliteTable("seasons", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  code: text("code").notNull().unique(), // "2026", "2027"
+  name: text("name").notNull(), // "2026 芒果季"
+  status: text("status", { enum: ["draft", "active", "archived"] })
+    .notNull()
+    .default("draft"),
+  starts_at: text("starts_at"),
+  ended_at: text("ended_at"),
+  cloned_from_season_id: integer("cloned_from_season_id").references((): any => seasons.id),
+  created_at: text("created_at").notNull(), // UTC ISO + Z
 });
+
+export const product_groups = sqliteTable(
+  "product_groups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    season_id: integer("season_id")
+      .notNull()
+      .references(() => seasons.id),
+    slug: text("slug").notNull(), // "jinhwang-dried", "irwin-dried" — stable identifier within a season
+    name: text("name").notNull(), // 金煌芒果乾, 愛文芒果乾 — display
+    stock_fen: integer("stock_fen").notNull().default(0),
+    available: integer("available", { mode: "boolean" }).notNull().default(true),
+    display_order: integer("display_order").notNull().default(0),
+    created_at: text("created_at").notNull(),
+  },
+  (t) => ({
+    uqSeasonSlug: uniqueIndex("product_groups_season_slug").on(t.season_id, t.slug),
+  }),
+);
+
+export const products = sqliteTable(
+  "products",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    season_id: integer("season_id")
+      .notNull()
+      .references(() => seasons.id),
+    group_id: integer("group_id")
+      .notNull()
+      .references(() => product_groups.id),
+    sku: text("sku").notNull(), // season-local code (e.g. DRY-JH-1); not globally unique
+    name: text("name").notNull(),
+    variant: text("variant").notNull(),
+    package_fen: integer("package_fen").notNull(), // CHECK(package_fen > 0) enforced at SQL layer
+    price: integer("price").notNull(), // TWD, integer
+    available: integer("available", { mode: "boolean" }).notNull().default(true),
+    display_order: integer("display_order").notNull().default(0),
+  },
+  (t) => ({
+    uqSeasonSku: uniqueIndex("products_season_sku").on(t.season_id, t.sku),
+  }),
+);
 
 export const admin_users = sqliteTable("admin_users", {
   email: text("email").primaryKey(),
@@ -30,6 +87,13 @@ export const orders = sqliteTable(
   "orders",
   {
     order_id: text("order_id").primaryKey(), // M-YYYYMMDD-NNN, YYYYMMDD = Asia/Taipei
+    // V5.2: season_id is app-enforced NOT NULL. DB layer is nullable with DEFAULT (added via
+    // migration File 3 with DEFAULT (SELECT id FROM seasons WHERE code='2026')) so concurrent
+    // INSERTs during the column-add ALTER pick up the default. Application validation enforces
+    // non-null. Schema marks NOT NULL to reflect intent for code generation.
+    season_id: integer("season_id")
+      .notNull()
+      .references(() => seasons.id),
     created_at: text("created_at").notNull(), // UTC ISO-8601 + Z
     name: text("name").notNull(),
     phone: text("phone").notNull(),
@@ -59,6 +123,7 @@ export const orders = sqliteTable(
     byCreated: index("orders_by_created").on(t.created_at),
     byPaidShipped: index("orders_by_paid_shipped").on(t.paid, t.shipped),
     byLineUserId: index("orders_by_line_user_id").on(t.line_user_id),
+    bySeason: index("orders_by_season").on(t.season_id),
   }),
 );
 
@@ -69,14 +134,19 @@ export const order_items = sqliteTable(
     order_id: text("order_id")
       .notNull()
       .references(() => orders.order_id, { onDelete: "cascade" }),
-    sku: text("sku")
+    // V5.2: product_id is the real FK; sku is a denorm snapshot for display
+    // (avoids forcing a JOIN to render order_id in admin lists). Both are
+    // captured at order-creation time and never updated after.
+    product_id: integer("product_id")
       .notNull()
-      .references(() => products.sku),
+      .references(() => products.id),
+    sku: text("sku").notNull(),
     qty: integer("qty").notNull(),
     unit_price: integer("unit_price").notNull(), // price snapshot at order time
   },
   (t) => ({
     byOrder: index("order_items_by_order").on(t.order_id),
+    byProduct: index("order_items_by_product").on(t.product_id),
   }),
 );
 
@@ -100,22 +170,34 @@ export const sessions = sqliteTable(
 //
 // audit_log.order_id IS a FK with cascade delete, so the PDPA 6-month purge
 // removes audit rows tied to deleted orders (including PII potentially in details).
+//
+// V5.2: season_id is added (nullable + default at DB level, app-enforced NOT NULL —
+// see orders.season_id comment for rationale). It enables non-order events like
+// `group_intake` and `season_activate` to carry season context for filtering.
 export const audit_log = sqliteTable(
   "audit_log",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     ts: text("ts").notNull(), // UTC ISO + Z
     user_email: text("user_email").notNull(), // intentionally NOT a FK
-    action: text("action").notNull(), // mark_paid, mark_shipped, update_tracking, telegram_failed, login_success, login_fail, ...
+    action: text("action").notNull(),
+    // Examples: mark_paid, mark_shipped, update_tracking, telegram_failed,
+    // login_success, login_fail, order_cancelled, order_created, order_save,
+    // group_intake, group_stock_change (reason=order_decrement|order_restore|edit_delta|migration_init),
+    // season_activate, season_archive
     order_id: text("order_id").references(() => orders.order_id, { onDelete: "cascade" }),
+    season_id: integer("season_id").references(() => seasons.id),
     details: text("details"), // JSON blob, free-form
   },
   (t) => ({
     byOrder: index("audit_log_by_order").on(t.order_id),
     byTs: index("audit_log_by_ts").on(t.ts),
+    bySeason: index("audit_log_by_season").on(t.season_id),
   }),
 );
 
+export type Season = typeof seasons.$inferSelect;
+export type ProductGroup = typeof product_groups.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof order_items.$inferSelect;

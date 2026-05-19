@@ -1,28 +1,25 @@
 import type { APIRoute } from "astro";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { makeDb } from "../../../../db/client";
-import { products } from "../../../../db/schema";
+import { products, seasons } from "../../../../db/schema";
 import { authorizeAdmin, json, text } from "../../../../lib/admin-api";
 import { env } from "../../../../lib/env";
 
-// V5 products batch save: sticky-save endpoint for the products page.
-// Accepts N rows of `{sku, fields?, stock?, stock_reason?}`. All-or-nothing
-// D1 batch with per-stmt meta.changes verification (lessons from V4 stock.ts).
+// V5 products batch save (V5.2-adapted).
+// Sticky-save endpoint for the admin products page. Accepts N rows of `{sku, fields?}`.
+// All-or-nothing D1 batch with per-stmt meta.changes verification (lessons from V4 stock.ts).
 //
-// Scope:
-//   - fields: name, variant, price, available, display_order — straight UPDATE
-//   - stock: optional; requires stock_reason; gets the unshipped_total guard
-//     from /products/[sku]/stock (no override in batch — push override case to
-//     the per-sku endpoint with its dedicated confirm flow).
+// V5.2 changes:
+//   - Lookup is now (active_season_id, sku) → product_id. Same-SKU strings across seasons
+//     stay isolated.
+//   - The `stock` field is REMOVED. Stock lives on product_groups.stock_fen now; adjust via
+//     the dedicated /api/admin/product-groups/:id/intake endpoint (PR2). The old stock guard
+//     here (unshipped_total comparison) doesn't apply — group fen pool model already prevents
+//     oversell at order time.
+//   - fields editable: name, variant, price, available, display_order. (Not group_id, not
+//     package_fen — those would require migration-style rewrites.)
 //
-// Stock guard behavior on batch fail: any row's new_stock < unshipped_total
-// rejects the WHOLE batch with the offending sku reported. User can edit
-// that row's stock back, or use the per-sku /stock endpoint with override.
-
-interface StockUpdate {
-  new_stock: number;
-  reason: string;
-}
+// Stock adjustments via this endpoint return 400 with a clear message.
 
 interface ProductRowFields {
   name?: string;
@@ -35,7 +32,8 @@ interface ProductRowFields {
 interface ProductBatchRow {
   sku: string;
   fields?: ProductRowFields;
-  stock?: StockUpdate;
+  // V5.2: stock field rejected — kept here for clearer error message.
+  stock?: unknown;
 }
 
 interface BatchRequest {
@@ -65,6 +63,18 @@ export const POST: APIRoute = async ({ request }) => {
   // Validate each row
   for (const r of body.rows) {
     if (!r.sku || !/^[A-Z0-9_-]+$/.test(r.sku)) return text(`bad sku ${r.sku}`, 400);
+    if (r.stock !== undefined) {
+      return json(
+        {
+          ok: false,
+          error_code: "DEPRECATED_FIELD",
+          sku: r.sku,
+          message:
+            "V5.2: 不能透過 batch 改 stock。請用「進貨」功能（PR2）— POST /api/admin/product-groups/:id/intake",
+        },
+        400,
+      );
+    }
     if (r.fields) {
       const f = r.fields;
       if (f.name !== undefined && (typeof f.name !== "string" || f.name.trim().length === 0 || f.name.length > 50))
@@ -78,68 +88,32 @@ export const POST: APIRoute = async ({ request }) => {
       if (f.available !== undefined && typeof f.available !== "boolean")
         return text(`bad available on ${r.sku}`, 400);
     }
-    if (r.stock) {
-      if (!Number.isInteger(r.stock.new_stock) || r.stock.new_stock < 0 || r.stock.new_stock > 9999)
-        return text(`bad stock on ${r.sku}`, 400);
-      const reason = (r.stock.reason ?? "").trim();
-      if (reason.length === 0 || reason.length > 200)
-        return text(`reason required on ${r.sku} (1-200 chars)`, 400);
-    }
-    // At least one of fields or stock must be present.
-    if (!r.fields && !r.stock) return text(`empty row ${r.sku}`, 400);
+    if (!r.fields) return text(`empty row ${r.sku}`, 400);
   }
 
   const db = makeDb(env);
 
-  // Read all touched products for current values + diff.
+  // Resolve active season (lookup scope)
+  const seasonRow = await db
+    .select({ id: seasons.id })
+    .from(seasons)
+    .where(eq(seasons.status, "active"))
+    .limit(1);
+  if (seasonRow.length === 0) {
+    return json({ ok: false, error_code: "NO_ACTIVE_SEASON" }, 409);
+  }
+  const seasonId = seasonRow[0]!.id;
+
+  // Read all touched products WITHIN the active season
   const skus = body.rows.map((r) => r.sku);
   const existingRows = await db
     .select()
     .from(products)
-    .where(inArray(products.sku, skus));
+    .where(and(eq(products.season_id, seasonId), inArray(products.sku, skus)));
   const existingMap = new Map(existingRows.map((p) => [p.sku, p]));
 
   for (const r of body.rows) {
-    if (!existingMap.has(r.sku)) return text(`sku ${r.sku} not found`, 404);
-  }
-
-  // Stock guard: for any row with stock change, check unshipped_total.
-  const rowsWithStock = body.rows.filter((r) => r.stock !== undefined);
-  if (rowsWithStock.length > 0) {
-    const stockSkus = rowsWithStock.map((r) => r.sku);
-    const placeholders = stockSkus.map(() => "?").join(",");
-    const stockSumResult = await env.DB.prepare(
-      `SELECT oi.sku AS sku, COALESCE(SUM(oi.qty), 0) AS unshipped_total
-       FROM order_items oi
-       JOIN orders o ON o.order_id = oi.order_id
-       WHERE oi.sku IN (${placeholders})
-         AND o.shipped = 0
-         AND o.cancelled_at IS NULL
-       GROUP BY oi.sku`,
-    ).bind(...stockSkus).all<{ sku: string; unshipped_total: number }>();
-
-    const unshippedMap = new Map<string, number>();
-    for (const row of stockSumResult.results ?? []) {
-      unshippedMap.set(row.sku, row.unshipped_total ?? 0);
-    }
-
-    for (const r of rowsWithStock) {
-      const unshipped = unshippedMap.get(r.sku) ?? 0;
-      if (r.stock!.new_stock < unshipped) {
-        return json(
-          {
-            ok: false,
-            error_code: "STOCK_BELOW_UNSHIPPED",
-            sku: r.sku,
-            unshipped_total: unshipped,
-            attempted: r.stock!.new_stock,
-            current_stock: existingMap.get(r.sku)!.stock,
-            message: `${r.sku}：新庫存 ${r.stock!.new_stock} 比未出貨單 ${unshipped} 少`,
-          },
-          409,
-        );
-      }
-    }
+    if (!existingMap.has(r.sku)) return text(`sku ${r.sku} not found in active season`, 404);
   }
 
   // Build batch: per-row UPDATE + audit_log.
@@ -150,7 +124,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   for (const r of body.rows) {
     const ex = existingMap.get(r.sku)!;
-    const auditDetails: Record<string, unknown> = { sku: r.sku };
+    const auditDetails: Record<string, unknown> = { sku: r.sku, product_id: ex.id };
     let rowChanged = false;
 
     if (r.fields) {
@@ -190,42 +164,21 @@ export const POST: APIRoute = async ({ request }) => {
       if (setParts.length > 0) {
         batch.push(
           env.DB.prepare(
-            `UPDATE products SET ${setParts.join(", ")} WHERE sku = ?`,
-          ).bind(...setBinds, r.sku),
+            `UPDATE products SET ${setParts.join(", ")} WHERE id = ?`,
+          ).bind(...setBinds, ex.id),
         );
         actualWrites += 1;
       }
     }
 
-    if (r.stock && r.stock.new_stock !== ex.stock) {
-      // CAS on `stock = ex.stock` to close the precheck→write race window
-      // (Codex finding #5). If a customer order or another admin write changed
-      // stock between the unshipped_total precheck above and this UPDATE, the
-      // WHERE matches 0 rows and the post-batch meta.changes verifier below
-      // returns BATCH_PARTIAL_FAILURE. Operator sees the error, reloads, and
-      // re-issues against fresh state instead of blindly overwriting.
-      batch.push(
-        env.DB.prepare(
-          `UPDATE products SET stock = ? WHERE sku = ? AND stock = ?`,
-        ).bind(r.stock.new_stock, r.sku, ex.stock),
-      );
-      auditDetails.stock = {
-        from: ex.stock,
-        to: r.stock.new_stock,
-        reason: r.stock.reason.trim(),
-      };
-      actualWrites += 1;
-      rowChanged = true;
-    }
-
     if (rowChanged) {
       batch.push(
         env.DB.prepare(
-          `INSERT INTO audit_log (ts, user_email, action, details) VALUES (?, ?, ?, ?)`,
+          `INSERT INTO audit_log (ts, user_email, action, season_id, details) VALUES (?, ?, 'product_update', ?, ?)`,
         ).bind(
           now,
           auth.session.email,
-          r.stock ? "product_batch_save" : "product_update",
+          seasonId,
           JSON.stringify({
             ...auditDetails,
             ...(body.idempotency_key ? { idempotency_key: body.idempotency_key } : {}),
@@ -241,8 +194,8 @@ export const POST: APIRoute = async ({ request }) => {
 
   const results = await env.DB.batch(batch);
 
-  // Per-stmt meta.changes verification (V4 stock.ts pattern). All stmts in
-  // batch are UPDATEs or INSERTs that must have changes >= 1. Any 0 = bug.
+  // Per-stmt meta.changes verification (V4 stock.ts pattern). All stmts in batch are
+  // UPDATEs or INSERTs that must have changes >= 1. Any 0 = bug.
   for (let i = 0; i < results.length; i++) {
     if ((results[i]?.meta?.changes ?? 0) === 0) {
       return json(

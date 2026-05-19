@@ -6,9 +6,10 @@ interface Props {
 }
 
 const { product } = Astro.props;
-// V4: sellable means admin keeps it on the menu AND there's actual stock left.
+// V5.2: sellable means admin keeps it on the menu AND the group pool has enough fen
+// for at least one of this package size. derived_available_count = floor(group_stock_fen / package_fen).
 // Either condition false → show 已售完 + 灰化.
-const sellable = product.available && product.stock > 0;
+const sellable = product.available && product.derived_available_count > 0;
 ---
 
 <article
