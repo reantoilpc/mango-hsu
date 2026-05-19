@@ -1,24 +1,31 @@
-// V5 /api/admin/products/batch integration tests.
+// V5.2 /api/admin/products/batch integration tests.
 //
-// Verifies all-or-nothing batch with per-stmt meta.changes verification, stock
-// guard against unshipped_total, server-side field diff (only audits real
-// changes).
+// Verifies all-or-nothing batch with per-stmt meta.changes verification, server-side field
+// diff (only audits real changes), CSRF.
+//
+// V5.2 changes:
+//   - The `stock` field is REMOVED from this endpoint. Stock lives on product_groups.stock_fen
+//     and is mutated via /api/admin/product-groups/:id/intake (PR2). batch.ts now rejects
+//     any row with `stock` set as `DEPRECATED_FIELD`.
+//   - Lookup is (active_season_id, sku) → product_id.
 
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import {
   STAGE_URL,
-  TEST_TOKEN,
   cleanupTestData,
   cleanupTestAdmin,
   createTestAdminSession,
   d1Execute,
-  seedSku,
+  seedActiveSeasonScenario,
   skipIfNoIntegration,
 } from "./_setup";
 
 const SKIP = skipIfNoIntegration();
+const TEST_SEASON_CODE = "test-batch-season";
+const TEST_GROUP_SLUG = "test-batch-group";
 const TEST_SKU_A = "TEST-BATCH-A";
 const TEST_SKU_B = "TEST-BATCH-B";
+const PACKAGE_FEN = 100;
 
 beforeEach(() => {
   if (SKIP) return;
@@ -32,6 +39,18 @@ afterAll(() => {
   cleanupTestAdmin();
 });
 
+function seedTwoSkus(price: number = 100) {
+  seedActiveSeasonScenario({
+    season_code: TEST_SEASON_CODE,
+    group_slug: TEST_GROUP_SLUG,
+    initial_stock_fen: 10 * PACKAGE_FEN,
+    skus: [
+      { sku: TEST_SKU_A, package_fen: PACKAGE_FEN, price },
+      { sku: TEST_SKU_B, package_fen: PACKAGE_FEN, price },
+    ],
+  });
+}
+
 interface BatchPayload {
   rows: Array<{
     sku: string;
@@ -42,7 +61,8 @@ interface BatchPayload {
       available?: boolean;
       display_order?: number;
     };
-    stock?: { new_stock: number; reason: string };
+    // V5.2: stock field deprecated; sending it returns DEPRECATED_FIELD.
+    stock?: unknown;
   }>;
   idempotency_key?: string;
 }
@@ -59,32 +79,10 @@ async function adminBatch(cookie: string, payload: BatchPayload): Promise<Respon
   });
 }
 
-async function placeCustomerOrder(sku: string, qty: number): Promise<string> {
-  const res = await fetch(`${STAGE_URL}/api/orders`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Test-Mode": "1" },
-    body: JSON.stringify({
-      idempotency_key: `test-${crypto.randomUUID()}`,
-      token: TEST_TOKEN,
-      honeypot: "",
-      name: "test-buyer",
-      phone: "0912345678",
-      address: "test address 300",
-      items: [{ sku, qty }],
-      notes: "",
-      pdpa_accepted: true,
-    }),
-  });
-  const body = (await res.json()) as { ok: boolean; order_id?: string };
-  if (!body.ok || !body.order_id) throw new Error(`order failed: ${JSON.stringify(body)}`);
-  return body.order_id;
-}
-
-describe("V5 /products/batch endpoint", () => {
+describe("V5.2 /products/batch endpoint", () => {
   it("multi-row field update: all rows applied", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
-    seedSku(TEST_SKU_B, { stock: 10 });
+    seedTwoSkus();
     const cookie = createTestAdminSession();
 
     const res = await adminBatch(cookie, {
@@ -98,19 +96,24 @@ describe("V5 /products/batch endpoint", () => {
     expect(body.ok).toBe(true);
     expect(body.applied).toBeGreaterThanOrEqual(2);
 
-    const a = d1Execute(`SELECT price FROM products WHERE sku = '${TEST_SKU_A}'`) as Array<{
-      price: number;
-    }>;
-    expect(a[0].price).toBe(999);
-    const b = d1Execute(`SELECT name FROM products WHERE sku = '${TEST_SKU_B}'`) as Array<{
-      name: string;
-    }>;
-    expect(b[0].name).toBe("renamed-batch");
+    // Verify within active season
+    const a = d1Execute(
+      `SELECT p.price FROM products p
+         JOIN seasons s ON s.id = p.season_id AND s.status = 'active'
+        WHERE p.sku = '${TEST_SKU_A}'`,
+    ) as Array<{ price: number }>;
+    expect(a[0]!.price).toBe(999);
+    const b = d1Execute(
+      `SELECT p.name FROM products p
+         JOIN seasons s ON s.id = p.season_id AND s.status = 'active'
+        WHERE p.sku = '${TEST_SKU_B}'`,
+    ) as Array<{ name: string }>;
+    expect(b[0]!.name).toBe("renamed-batch");
   });
 
   it("server-side diff: same value as DB writes nothing", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5, price: 100 });
+    seedTwoSkus(100);
     const cookie = createTestAdminSession();
 
     const res = await adminBatch(cookie, {
@@ -119,56 +122,26 @@ describe("V5 /products/batch endpoint", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; applied?: number };
     expect(body.ok).toBe(true);
-    // applied 0 because diff was empty
     expect(body.applied ?? 0).toBe(0);
   });
 
-  it("STOCK_BELOW_UNSHIPPED rejects whole batch with offending sku", async () => {
+  it("V5.2: stock field rejected with DEPRECATED_FIELD (point to intake endpoint)", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
-    seedSku(TEST_SKU_B, { stock: 10 });
-    const cookie = createTestAdminSession();
-    // Create unshipped order using TEST_SKU_A — qty 2 unshipped.
-    await placeCustomerOrder(TEST_SKU_A, 2);
-
-    // Try to set TEST_SKU_A stock to 1 (below unshipped 2). Other row should
-    // also NOT apply — all-or-nothing.
-    const res = await adminBatch(cookie, {
-      rows: [
-        { sku: TEST_SKU_A, stock: { new_stock: 1, reason: "test conflict" } },
-        { sku: TEST_SKU_B, fields: { price: 555 } },
-      ],
-    });
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as {
-      error_code: string;
-      sku: string;
-      unshipped_total: number;
-    };
-    expect(body.error_code).toBe("STOCK_BELOW_UNSHIPPED");
-    expect(body.sku).toBe(TEST_SKU_A);
-
-    // TEST_SKU_B's price update must NOT have applied.
-    const b = d1Execute(`SELECT price FROM products WHERE sku = '${TEST_SKU_B}'`) as Array<{
-      price: number;
-    }>;
-    expect(b[0].price).toBe(100); // default seedSku price
-  });
-
-  it("stock without reason rejected (400)", async () => {
-    if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedTwoSkus();
     const cookie = createTestAdminSession();
 
     const res = await adminBatch(cookie, {
-      rows: [{ sku: TEST_SKU_A, stock: { new_stock: 8, reason: "" } }],
+      rows: [{ sku: TEST_SKU_A, stock: 5 }],
     });
     expect(res.status).toBe(400);
+    const body = (await res.json()) as { error_code: string; sku?: string };
+    expect(body.error_code).toBe("DEPRECATED_FIELD");
+    expect(body.sku).toBe(TEST_SKU_A);
   });
 
-  it("empty row (no fields, no stock) rejected (400)", async () => {
+  it("empty row (no fields) rejected (400)", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedTwoSkus();
     const cookie = createTestAdminSession();
 
     const res = await adminBatch(cookie, {
@@ -179,6 +152,7 @@ describe("V5 /products/batch endpoint", () => {
 
   it("non-existent sku returns 404", async () => {
     if (SKIP) return;
+    seedTwoSkus(); // need an active season for the lookup
     const cookie = createTestAdminSession();
     const res = await adminBatch(cookie, {
       rows: [{ sku: "TEST-DOESNT-EXIST", fields: { price: 1 } }],
@@ -188,7 +162,7 @@ describe("V5 /products/batch endpoint", () => {
 
   it("CSRF: missing Origin header → rejected", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedTwoSkus();
     const cookie = createTestAdminSession();
 
     const res = await fetch(`${STAGE_URL}/api/admin/products/batch`, {
@@ -196,7 +170,6 @@ describe("V5 /products/batch endpoint", () => {
       headers: {
         "Content-Type": "application/json",
         Cookie: cookie,
-        // no Origin
       },
       body: JSON.stringify({ rows: [{ sku: TEST_SKU_A, fields: { price: 9 } }] }),
     });
