@@ -11,7 +11,7 @@ const settings = await loadSiteSettings(env);
 // The middle state existed before but was undetected — pill said 接單中 while
 // /order rendered 今年全部售完, sending users to a dead end.
 const accepting = settings.accepting_dry;
-const hasStock = settings.products.some((p) => p.available && p.stock > 0);
+const hasStock = settings.products.some((p) => p.available && p.derived_available_count > 0);
 const orderState: "closed" | "soldout" | "open" = !accepting
   ? "closed"
   : hasStock

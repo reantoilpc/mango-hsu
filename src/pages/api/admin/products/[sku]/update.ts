@@ -1,13 +1,16 @@
 import type { APIRoute } from "astro";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { authorizeAdmin, json, text } from "../../../../../lib/admin-api";
 import { makeDb } from "../../../../../db/client";
-import { products } from "../../../../../db/schema";
+import { products, seasons } from "../../../../../db/schema";
 import { env } from "../../../../../lib/env";
 
-export const POST: APIRoute = async ({ request, params, locals }) => {
-
-
+// V5.2: update an existing product within the active season. Lookup is
+// (active_season_id, sku) → numeric id. Field updates: name, variant, price,
+// available, display_order. Stock + group + package_fen are not editable here
+// (stock via intake; group + package_fen would require a more careful migration-style
+// flow because they affect order_items and pool weight).
+export const POST: APIRoute = async ({ request, params }) => {
   const auth = await authorizeAdmin(request, env, "admin");
   if (!auth.ok) return text(auth.reason, auth.status);
 
@@ -38,28 +41,43 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
   if (!Number.isInteger(price) || price < 0 || price > 100_000) return text("bad price", 400);
 
   const db = makeDb(env);
-  const existing = await db
-    .select({ sku: products.sku })
-    .from(products)
-    .where(eq(products.sku, sku))
+
+  // Resolve active season
+  const seasonRow = await db
+    .select({ id: seasons.id })
+    .from(seasons)
+    .where(eq(seasons.status, "active"))
     .limit(1);
-  if (existing.length === 0) return text("not found", 404);
+  if (seasonRow.length === 0) {
+    return json({ ok: false, error_code: "NO_ACTIVE_SEASON" }, 409);
+  }
+  const seasonId = seasonRow[0]!.id;
+
+  // Look up product within active season
+  const existing = await db
+    .select()
+    .from(products)
+    .where(and(eq(products.season_id, seasonId), eq(products.sku, sku)))
+    .limit(1);
+  if (existing.length === 0) return text("not found in active season", 404);
+  const productId = existing[0]!.id;
 
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB
       .prepare(
-        "UPDATE products SET name = ?, variant = ?, price = ?, available = ?, display_order = ? WHERE sku = ?",
+        "UPDATE products SET name = ?, variant = ?, price = ?, available = ?, display_order = ? WHERE id = ?",
       )
-      .bind(name, variant, price, available ? 1 : 0, display_order, sku),
+      .bind(name, variant, price, available ? 1 : 0, display_order, productId),
     env.DB
       .prepare(
-        "INSERT INTO audit_log (ts, user_email, action, details) VALUES (?, ?, 'product_update', ?)",
+        "INSERT INTO audit_log (ts, user_email, action, season_id, details) VALUES (?, ?, 'product_update', ?, ?)",
       )
       .bind(
         now,
         auth.session.email,
-        JSON.stringify({ sku, name, variant, price, available, display_order }),
+        seasonId,
+        JSON.stringify({ sku, product_id: productId, name, variant, price, available, display_order }),
       ),
   ]);
 

@@ -1,12 +1,15 @@
 import type { AppEnv, Db } from "../db/client";
 import { audit_log } from "../db/schema";
-import type { Order, OrderItem, Product } from "../db/schema";
+import type { Order } from "../db/schema";
 
+// V5.2: items shape is now generic — caller (api/orders.ts) passes the resolved
+// product info directly so telegram doesn't need to JOIN. sku/name/variant/qty
+// are all the message needs.
 export async function notifyOrder(
   env: AppEnv,
   db: Db,
   order: Order,
-  items: Array<OrderItem & { product?: Product }>,
+  items: Array<{ sku: string; name?: string; variant?: string; qty: number }>,
 ): Promise<void> {
   const token = env.TELEGRAM_BOT_TOKEN;
   const chatId = env.TELEGRAM_CHAT_ID;
@@ -23,7 +26,7 @@ export async function notifyOrder(
 
   const itemsLine = items
     .map((i) => {
-      const label = i.product ? `${i.product.name}${i.product.variant}` : i.sku;
+      const label = i.name && i.variant ? `${i.name}${i.variant}` : i.sku;
       return `${label} ×${i.qty}`;
     })
     .join("、");

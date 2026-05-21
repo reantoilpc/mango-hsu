@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { eq } from "drizzle-orm";
 import { makeDb } from "../../db/client";
-import { orders, order_items, products, audit_log } from "../../db/schema";
+import { orders, order_items, audit_log, seasons } from "../../db/schema";
 import { nextOrderId } from "../../lib/order-id";
 import { checkOrderRate } from "../../lib/rate-limit";
 import {
@@ -12,7 +12,13 @@ import {
 } from "../../lib/order-response";
 import { validateCustomerOrder } from "../../lib/order-validate";
 import { isUniqueOnIdempotency, isUniqueOnOrderId } from "../../lib/order-errors";
-import { tryDecrementStock, restoreStock } from "../../lib/stock";
+import {
+  resolveItemsForStock,
+  tryDecrementGroupStock,
+  restoreGroupStock,
+  getGroupStockFen,
+  stockAuditStmts,
+} from "../../lib/stock";
 import { notifyOrder } from "../../lib/telegram";
 import { env } from "../../lib/env";
 
@@ -51,11 +57,12 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     return json({ ok: false, error_code: "INVALID_TOKEN" });
   }
 
-  // Stage-only rate-limit bypass for integration tests. Three gates: (1) the
-  // ALLOW_TEST_BYPASS var must be "1" — only set on stage in scripts/deploy.mjs,
-  // so prod never reaches this branch; (2) valid ORDER_TOKEN — already checked
-  // above; (3) X-Test-Mode: 1 header. Tests share one client IP and KV cache
-  // TTL prevents instant rate-limit resets between cases.
+  // Stage-only rate-limit bypass for integration tests. Three gates:
+  // (1) ALLOW_TEST_BYPASS=1 — only set on stage in scripts/deploy.mjs, so prod
+  //     never reaches this branch
+  // (2) valid ORDER_TOKEN — already checked above
+  // (3) X-Test-Mode: 1 header
+  // Tests share one client IP and KV cache TTL prevents instant rate-limit resets.
   const ip = request.headers.get("cf-connecting-ip") || clientAddress || "unknown";
   const isTestBypass =
     env.ALLOW_TEST_BYPASS === "1" && request.headers.get("x-test-mode") === "1";
@@ -90,37 +97,62 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     return json(await assembleOrderSuccess(prior[0]!, items, env));
   }
 
-  // 2) Season check
+  // 2) Season check (legacy ACCEPTING_DRY env var — kept as global emergency switch).
+  // Per-season status='active' is the V5.2 canonical gate, but ACCEPTING_DRY can still
+  // shut everything off without a DB write.
   if (env.ACCEPTING_DRY !== "true") {
     return json({ ok: false, error_code: "SEASON_CLOSED" });
   }
 
-  // 3) Product + availability + price snapshot
-  const prodRows = await db.select().from(products);
-  const prodMap = new Map(prodRows.map((p) => [p.sku, p]));
-  let subtotal = 0;
-  const itemsWithPrice: Array<{ sku: string; qty: number; unit_price: number }> = [];
-  for (const it of body.items) {
-    const p = prodMap.get(it.sku);
-    if (!p) return json({ ok: false, error_code: "INVALID_INPUT" });
-    if (!p.available) {
-      return json({ ok: false, error_code: "SOLD_OUT", sold_out_sku: it.sku });
+  // 3) Resolve items against active-season products.
+  // Returns sku→product info + pre-aggregated group fen demand. unknown_product if any
+  // sku isn't in the active season (or available=false → SOLD_OUT for that sku).
+  const resolved = await resolveItemsForStock(env, body.items);
+  if (!resolved.ok) {
+    if (resolved.error_code === "unknown_product") {
+      return json({ ok: false, error_code: "unknown_product", sku: resolved.sku });
     }
-    subtotal += p.price * it.qty;
-    itemsWithPrice.push({ sku: it.sku, qty: it.qty, unit_price: p.price });
+    // SOLD_OUT (available=false) — sku-level signal, no group_id since the product
+    // is hidden, not just out-of-stock.
+    return json({ ok: false, error_code: "SOLD_OUT", sku: resolved.sku });
+  }
+
+  // 4) Compute totals from resolved snapshot (price taken at this moment).
+  let subtotal = 0;
+  for (const r of resolved.resolved) {
+    subtotal += r.price * r.qty;
   }
   const shipping = shippingFor(body.items, env);
   const total = subtotal + shipping;
 
-  // 3.5) Atomic stock reserve (BEFORE the order_id retry loop — exactly once
-  // regardless of order_id collisions). On idempotency_key race we restore;
-  // on order_id collision we KEEP the reservation across retries.
-  const reserve = await tryDecrementStock(env, body.items);
+  // 5) Read group stock_fen BEFORE the CAS so we can write before/after into audit_log.
+  // (Atomicity: the audit row goes into the same batch as the order INSERT below; the
+  // CAS itself is a separate batch but compensates on failure.)
+  const groupIds = resolved.group_decrements.map((d) => d.group_id);
+  const beforeFenMap = await getGroupStockFen(env, groupIds);
+
+  // 6) Atomic group-pool reserve. Done BEFORE the order_id retry loop — exactly once
+  // regardless of order_id collisions. On idempotency_key race we restore; on order_id
+  // collision we KEEP the reservation across retries (same items[] reused).
+  const reserve = await tryDecrementGroupStock(env, resolved.group_decrements);
   if (!reserve.ok) {
-    return json({ ok: false, error_code: "SOLD_OUT", sold_out_sku: reserve.sold_out_sku });
+    return json({
+      ok: false,
+      error_code: "SOLD_OUT",
+      sold_out_group_id: reserve.sold_out_group_id,
+    });
   }
 
-  // 4) Insert with race-aware order_id retry (max 3 attempts).
+  // 7) Look up active season id (orders.season_id is FK; defaulted at DB level for
+  // migration safety but we set it explicitly here).
+  const seasonRow = await db
+    .select({ id: seasons.id })
+    .from(seasons)
+    .where(eq(seasons.status, "active"))
+    .limit(1);
+  const seasonId = seasonRow[0]?.id ?? null;
+
+  // 8) Insert with race-aware order_id retry (max 3 attempts).
   for (let attempt = 0; attempt < 3; attempt++) {
     const orderId = await nextOrderId(db);
     const expectedMemo = expectedMemoFor(orderId, body.name);
@@ -129,9 +161,10 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     try {
       await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO orders (order_id, created_at, name, phone, address, notes, subtotal, shipping, total, expected_memo, pdpa_accepted, paid, shipped, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
+          `INSERT INTO orders (order_id, season_id, created_at, name, phone, address, notes, subtotal, shipping, total, expected_memo, pdpa_accepted, paid, shipped, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
         ).bind(
           orderId,
+          seasonId,
           createdAt,
           body.name,
           body.phone,
@@ -144,19 +177,37 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
           body.pdpa_accepted ? 1 : 0,
           body.idempotency_key,
         ),
-        ...itemsWithPrice.map((i) =>
+        ...resolved.resolved.map((r) =>
           env.DB.prepare(
-            `INSERT INTO order_items (order_id, sku, qty, unit_price) VALUES (?, ?, ?, ?)`,
-          ).bind(orderId, i.sku, i.qty, i.unit_price),
+            `INSERT INTO order_items (order_id, product_id, sku, qty, unit_price) VALUES (?, ?, ?, ?, ?)`,
+          ).bind(orderId, r.product_id, r.sku, r.qty, r.price),
+        ),
+        // Per-group audit row for the decrement (reconcile-stock.ts walks these)
+        ...stockAuditStmts(
+          env,
+          resolved.group_decrements.map((d) => {
+            const before = beforeFenMap.get(d.group_id) ?? 0;
+            return {
+              group_id: d.group_id,
+              delta_fen: -d.fen,
+              before_fen: before,
+              after_fen: before - d.fen,
+              reason: "order_decrement" as const,
+              source_id: orderId,
+              season_id: seasonId ?? undefined,
+              ts: createdAt,
+            };
+          }),
         ),
         env.DB.prepare(
-          `INSERT INTO audit_log (ts, user_email, action, order_id, details) VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO audit_log (ts, user_email, action, order_id, season_id, details) VALUES (?, ?, ?, ?, ?, ?)`,
         ).bind(
-          new Date().toISOString(),
+          createdAt,
           "<system>",
           "order_created",
           orderId,
-          JSON.stringify({ ip, qty: itemsWithPrice.length }),
+          seasonId,
+          JSON.stringify({ ip, qty: resolved.resolved.length }),
         ),
       ]);
 
@@ -169,20 +220,28 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
         .from(order_items)
         .where(eq(order_items.order_id, orderId));
 
-      // Telegram fire-and-forget
-      const itemsForTelegram = fullItems.map((i) => ({
-        ...i,
-        product: prodMap.get(i.sku),
-      }));
-      ctx?.waitUntil(notifyOrder(env, db, fullOrder, itemsForTelegram));
+      // Telegram fire-and-forget — pass resolved snapshot directly (has name/variant)
+      ctx?.waitUntil(
+        notifyOrder(
+          env,
+          db,
+          fullOrder,
+          resolved.resolved.map((r) => ({
+            sku: r.sku,
+            name: r.name,
+            variant: r.variant,
+            qty: r.qty,
+          })),
+        ),
+      );
 
       return json(await assembleOrderSuccess(fullOrder, fullItems, env));
     } catch (err) {
       if (isUniqueOnIdempotency(err)) {
         // Race-of-race: another request just inserted with the same idempotency key.
         // Their reservation already covered the stock; ours must be returned BEFORE
-        // the replay select, so any select error doesn't leave dangling stock.
-        await restoreStock(env, body.items);
+        // the replay select.
+        await restoreGroupStock(env, resolved.group_decrements);
         const existing = await db
           .select()
           .from(orders)
@@ -203,12 +262,13 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
         continue;
       }
       // Unknown error — restore reservation, then bail.
-      await restoreStock(env, body.items);
+      await restoreGroupStock(env, resolved.group_decrements);
       try {
         await db.insert(audit_log).values({
           ts: new Date().toISOString(),
           user_email: "<system>",
           action: "order_internal_error",
+          season_id: seasonId,
           details: JSON.stringify({
             error: err instanceof Error ? err.message : String(err),
             ip,
@@ -222,6 +282,6 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   }
 
   // Exhausted retries — restore reservation before returning.
-  await restoreStock(env, body.items);
+  await restoreGroupStock(env, resolved.group_decrements);
   return json({ ok: false, error_code: "LOCKED" });
 };

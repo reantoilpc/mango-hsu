@@ -1,8 +1,13 @@
-// V5 /api/admin/orders/:id/save integration tests.
+// V5.2 /api/admin/orders/:id/save integration tests.
 //
-// Verifies the gate-first batch pattern: expected_state validation, server-side
-// field diff, items diff with stock CAS, idempotency replay, read-only state
-// guards. Mirrors tests/admin-idempotency.test.ts style.
+// Verifies the gate-first batch pattern: expected_state validation, server-side field diff,
+// items diff with group fen CAS, idempotency replay, read-only state guards.
+//
+// V5.2 changes:
+//   - Stock assertions check group stock_fen.
+//   - items_hash is checked dual-format on the server (sku-based OR product_id-based).
+//   - current_state no longer echoes items_hash (client doesn't need it; uses currently-loaded
+//     items + recompute on STALE).
 //
 // Skipped without MANGO_STAGE_URL + TEST_TOKEN.
 
@@ -14,14 +19,24 @@ import {
   cleanupTestAdmin,
   createTestAdminSession,
   d1Execute,
-  getSkuStock,
-  seedSku,
+  getGroupStockFen,
+  seedActiveSeasonScenario,
+  seedGroup,
+  seedProductInSeason,
   skipIfNoIntegration,
 } from "./_setup";
 
 const SKIP = skipIfNoIntegration();
+const TEST_SEASON_CODE = "test-save-season";
+const TEST_GROUP_SLUG = "test-save-group-a";
+const TEST_GROUP_SLUG_B = "test-save-group-b";
 const TEST_SKU_A = "TEST-MANGO-SAVE-A";
 const TEST_SKU_B = "TEST-MANGO-SAVE-B";
+const PACKAGE_FEN = 100;
+
+let testGroupId = 0;
+let testGroupIdB = 0;
+let seasonId = 0;
 
 beforeEach(() => {
   if (SKIP) return;
@@ -34,6 +49,43 @@ afterAll(() => {
   cleanupTestData();
   cleanupTestAdmin();
 });
+
+function seedSingle(initialFen: number) {
+  const r = seedActiveSeasonScenario({
+    season_code: TEST_SEASON_CODE,
+    group_slug: TEST_GROUP_SLUG,
+    initial_stock_fen: initialFen,
+    skus: [{ sku: TEST_SKU_A, package_fen: PACKAGE_FEN }],
+  });
+  testGroupId = r.group_id;
+  seasonId = r.season_id;
+}
+
+function seedTwoGroupsTwoSkus(initialFenA: number, initialFenB: number) {
+  // Group A with SKU A
+  const r = seedActiveSeasonScenario({
+    season_code: TEST_SEASON_CODE,
+    group_slug: TEST_GROUP_SLUG,
+    initial_stock_fen: initialFenA,
+    skus: [{ sku: TEST_SKU_A, package_fen: PACKAGE_FEN }],
+  });
+  testGroupId = r.group_id;
+  seasonId = r.season_id;
+
+  // Group B with SKU B (separate pool)
+  testGroupIdB = seedGroup({
+    season_id: seasonId,
+    slug: TEST_GROUP_SLUG_B,
+    stock_fen: initialFenB,
+  });
+  seedProductInSeason({
+    season_id: seasonId,
+    group_id: testGroupIdB,
+    sku: TEST_SKU_B,
+    package_fen: PACKAGE_FEN,
+    price: 200,
+  });
+}
 
 async function placeCustomerOrder(sku: string, qty: number): Promise<string> {
   const res = await fetch(`${STAGE_URL}/api/orders`, {
@@ -87,10 +139,10 @@ async function adminSave(
   });
 }
 
-describe("V5 /save endpoint", () => {
+describe("V5.2 /save endpoint", () => {
   it("address-only edit: server-side diff audits and returns updated order", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 2);
 
@@ -106,19 +158,16 @@ describe("V5 /save endpoint", () => {
 
   it("server-side diff: same value as DB does NOT audit", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 2);
 
-    // Save with the SAME address that's already in DB.
     const res = await adminSave(cookie, orderId, {
       address: "test address 300",
       expected_state: { paid: false, shipped: false, cancelled_at: null },
     });
     expect(res.status).toBe(200);
 
-    // No audit row for this no-op save (only the customer-create audit row exists,
-    // if customer-create writes one — depends on existing pattern).
     const auditRows = d1Execute(
       `SELECT action FROM audit_log WHERE order_id = '${orderId}' AND action = 'order_save'`,
     ) as Array<{ action: string }>;
@@ -127,18 +176,16 @@ describe("V5 /save endpoint", () => {
 
   it("stale expected_state returns 409 STALE_STATE with current_state", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 1);
 
-    // Mark paid via existing endpoint (changes state).
     const paidRes = await fetch(`${STAGE_URL}/api/admin/orders/${orderId}/mark-paid`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: STAGE_URL, Cookie: cookie },
     });
     expect(paidRes.status).toBe(200);
 
-    // Save with stale expected_state (paid=false). Server should 409.
     const res = await adminSave(cookie, orderId, {
       address: "another address 400",
       expected_state: { paid: false, shipped: false, cancelled_at: null },
@@ -154,7 +201,7 @@ describe("V5 /save endpoint", () => {
 
   it("read-only state (paid) rejects items edit", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 1);
     await fetch(`${STAGE_URL}/api/admin/orders/${orderId}/mark-paid`, {
@@ -173,10 +220,10 @@ describe("V5 /save endpoint", () => {
 
   it("idempotency: replay with same key returns cached, no double-mutation", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 2);
-    expect(getSkuStock(TEST_SKU_A)).toBe(3);
+    expect(getGroupStockFen(testGroupId)).toBe(3 * PACKAGE_FEN);
 
     const idempotencyKey = `test-idempotency-${crypto.randomUUID()}`;
     const payload: SavePayload = {
@@ -186,42 +233,38 @@ describe("V5 /save endpoint", () => {
     };
     const r1 = await adminSave(cookie, orderId, payload);
     expect(r1.status).toBe(200);
-    expect(getSkuStock(TEST_SKU_A)).toBe(2);
+    expect(getGroupStockFen(testGroupId)).toBe(2 * PACKAGE_FEN);
 
-    // Replay: same key within 60s window → should NOT decrement again.
     const r2 = await adminSave(cookie, orderId, payload);
     expect(r2.status).toBe(200);
-    expect(getSkuStock(TEST_SKU_A)).toBe(2); // still 2, no re-decrement
+    expect(getGroupStockFen(testGroupId)).toBe(2 * PACKAGE_FEN);
   });
 
-  it("items diff: qty up decrements stock, qty down restores", async () => {
+  it("items diff: qty up decrements group stock, qty down restores", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 2);
-    expect(getSkuStock(TEST_SKU_A)).toBe(3);
+    expect(getGroupStockFen(testGroupId)).toBe(3 * PACKAGE_FEN);
 
-    // Bump qty 2 → 4 (decrement 2).
     let res = await adminSave(cookie, orderId, {
       items: [{ sku: TEST_SKU_A, qty: 4 }],
       expected_state: { paid: false, shipped: false, cancelled_at: null },
     });
     expect(res.status).toBe(200);
-    expect(getSkuStock(TEST_SKU_A)).toBe(1);
+    expect(getGroupStockFen(testGroupId)).toBe(1 * PACKAGE_FEN);
 
-    // Drop qty 4 → 1 (restore 3).
     res = await adminSave(cookie, orderId, {
       items: [{ sku: TEST_SKU_A, qty: 1 }],
       expected_state: { paid: false, shipped: false, cancelled_at: null },
     });
     expect(res.status).toBe(200);
-    expect(getSkuStock(TEST_SKU_A)).toBe(4);
+    expect(getGroupStockFen(testGroupId)).toBe(4 * PACKAGE_FEN);
   });
 
-  it("combined edit (items + address + notes): one /save call mutates all", async () => {
+  it("combined edit (items across two groups + address + notes): one /save call", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
-    seedSku(TEST_SKU_B, { stock: 5, price: 200 });
+    seedTwoGroupsTwoSkus(5 * PACKAGE_FEN, 5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 1);
 
@@ -235,27 +278,27 @@ describe("V5 /save endpoint", () => {
       expected_state: { paid: false, shipped: false, cancelled_at: null },
     });
     expect(res.status).toBe(200);
-    expect(getSkuStock(TEST_SKU_A)).toBe(3);
-    expect(getSkuStock(TEST_SKU_B)).toBe(4);
+    expect(getGroupStockFen(testGroupId)).toBe(3 * PACKAGE_FEN);
+    expect(getGroupStockFen(testGroupIdB)).toBe(4 * PACKAGE_FEN);
   });
 
   it("stale items_hash returns 409 STALE_STATE (concurrent-edit race detection)", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 2);
 
-    // Tab A loads the page, sees items=[{sku, qty:2}], computes hash.
+    // Tab A loads the page, sees items=[{sku:A, qty:2}], computes sku-based hash.
     const staleHash = `${TEST_SKU_A}:2`;
 
-    // Tab B saves first, changing qty 2→3 — current items now [{sku, qty:3}].
+    // Tab B saves first, changing qty 2 → 3 — current items now [{sku:A, qty:3}].
     const r1 = await adminSave(cookie, orderId, {
       items: [{ sku: TEST_SKU_A, qty: 3 }],
       expected_state: { paid: false, shipped: false, cancelled_at: null },
     });
     expect(r1.status).toBe(200);
 
-    // Tab A submits with its stale hash — server rejects.
+    // Tab A submits with its stale hash — server rejects (sku-hash format still tried first).
     const r2 = await adminSave(cookie, orderId, {
       items: [{ sku: TEST_SKU_A, qty: 4 }],
       expected_state: {
@@ -269,19 +312,17 @@ describe("V5 /save endpoint", () => {
     const body = (await r2.json()) as {
       error_code: string;
       stale_reason: string;
-      current_state: { items_hash: string };
     };
     expect(body.error_code).toBe("STALE_STATE");
     expect(body.stale_reason).toBe("items");
-    expect(body.current_state.items_hash).toBe(`${TEST_SKU_A}:3`);
 
-    // Stock should have decremented exactly once (5 → 3 from r1, not again).
-    expect(getSkuStock(TEST_SKU_A)).toBe(2);
+    // Group stock should have decremented exactly once (5→3 from r1, not again).
+    expect(getGroupStockFen(testGroupId)).toBe(2 * PACKAGE_FEN);
   });
 
   it("expected_state shape required (400 if malformed)", async () => {
     if (SKIP) return;
-    seedSku(TEST_SKU_A, { stock: 5 });
+    seedSingle(5 * PACKAGE_FEN);
     const cookie = createTestAdminSession();
     const orderId = await placeCustomerOrder(TEST_SKU_A, 1);
 

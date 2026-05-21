@@ -4,9 +4,11 @@ import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
 
 const settings = await loadSiteSettings(env);
-// V4: only show items the customer can actually buy — admin keeping it on the
-// menu (available) AND there's stock left.
-const sellable = settings.products.filter((p) => p.available && p.stock > 0);
+// V5.2: only show items the customer can actually buy — admin keeping it on the menu
+// (available) AND group pool has enough fen for at least one of this package size.
+const sellable = settings.products.filter(
+  (p) => p.available && p.derived_available_count > 0,
+);
 const freeShipMin = settings.free_shipping_min_packages;
 const shipFee = settings.shipping_fee_twd;
 ---
@@ -104,7 +106,7 @@ const shipFee = settings.shipping_fee_twd;
                       data-sku={p.sku}
                       data-price={p.price}
                       min="0"
-                      max={Math.min(99, p.stock)}
+                      max={Math.min(99, p.derived_available_count)}
                       value="0"
                       class="item-qty w-20 border border-mango-300 rounded px-2 py-1 text-center focus:border-mango-500 outline-none"
                     />
@@ -385,7 +387,11 @@ const shipFee = settings.shipping_fee_twd;
         submitBtn.disabled = false;
         submitBtn.textContent = "送出訂單";
         const msg = res.error_code === "SOLD_OUT"
-          ? `品項 ${res.sold_out_sku ?? ""} 剛剛售完，請調整後重新送出。`
+          ? (res.sold_out_group_id
+              ? `${settings.products.find((sp) => sp.group_id === res.sold_out_group_id)?.group_name ?? "選購商品"}庫存不足，請調整後重新送出。`
+              : `品項 ${res.sku ?? ""} 剛剛售完，請調整後重新送出。`)
+          : res.error_code === "unknown_product"
+          ? "您選的商品已下架，請重新整理頁面。"
           : res.error_code === "SEASON_CLOSED"
           ? "本季已暫停接單，下一季見。"
           : res.error_code === "INVALID_TOKEN"
