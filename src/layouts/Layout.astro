@@ -43,15 +43,27 @@ const isAdminShell = pathname.startsWith("/admin") && !!session;
     <header class="border-b border-mango-200 bg-white/60 backdrop-blur">
       <div class="max-w-4xl mx-auto px-5 py-4 flex items-center justify-between">
         <a href="/" class="flex items-center gap-2 font-bold text-lg">
-          <span class="text-2xl">🥭</span>
+          <svg viewBox="0 0 24 24" fill="currentColor" class="h-6 w-6 text-mango-500" aria-hidden="true">
+            <path d="M18.9 6.4C17.2 4 14 3 11 4.4 7.7 5.9 5.4 8.9 5 12.3c-.3 2.5.7 5 2.8 6.5 2 1.4 4.7 1.5 6.9.3 3.1-1.7 5.3-5 5.6-8.5.1-1.5-.2-3-1.4-4.2z"/>
+          </svg>
           <span>芒果許</span>
         </a>
         {isAdminShell ? (
-          <nav class="flex gap-1 text-sm">
-            <a href="/admin/orders" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">訂單</a>
-            <a href="/admin/products" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">商品</a>
-            <a href="/admin/audit" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更紀錄</a>
-            <a href="/admin/change-password" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">變更密碼</a>
+          <nav class="flex flex-wrap items-center gap-0.5 sm:gap-1 text-sm justify-end">
+            <a href="/admin/orders" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">訂單</a>
+            <a href="/admin/products" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">商品</a>
+            <a href="/admin/product-groups" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">
+              <span class="sm:hidden">庫存</span>
+              <span class="hidden sm:inline">庫存池</span>
+            </a>
+            <a href="/admin/audit" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">
+              <span class="sm:hidden">紀錄</span>
+              <span class="hidden sm:inline">變更紀錄</span>
+            </a>
+            <a href="/admin/change-password" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">
+              <span class="sm:hidden">密碼</span>
+              <span class="hidden sm:inline">變更密碼</span>
+            </a>
           </nav>
         ) : (
           <nav class="flex gap-1 text-sm">

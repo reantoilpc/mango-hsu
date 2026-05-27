@@ -9,28 +9,34 @@ import Layout from "../layouts/Layout.astro";
       輸入訂單編號 + 手機末 4 碼即可查詢。從訂單成立頁的「訂單狀態頁」連結進入會自動帶入。
     </p>
 
-    <form id="lookup-form" class="space-y-3 mb-8">
-      <input
-        type="text"
-        id="order-id-input"
-        placeholder="M-YYYYMMDD-NNN"
-        pattern="M-[0-9]{8}-[0-9]{3}"
-        class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white font-mono focus:border-mango-500 outline-none"
-        autocomplete="off"
-      />
-      <input
-        type="tel"
-        id="phone-last4-input"
-        placeholder="手機末 4 碼"
-        pattern="[0-9]{4}"
-        maxlength="4"
-        inputmode="numeric"
-        class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white font-mono focus:border-mango-500 outline-none"
-        autocomplete="off"
-      />
+    <form id="lookup-form" class="space-y-4 mb-8">
+      <div>
+        <label for="order-id-input" class="block mb-1 text-sm font-medium">訂單編號</label>
+        <input
+          type="text"
+          id="order-id-input"
+          placeholder="M-YYYYMMDD-NNN"
+          pattern="M-[0-9]{8}-[0-9]{3}"
+          class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white font-mono focus:border-mango-500 outline-none"
+          autocomplete="off"
+        />
+      </div>
+      <div>
+        <label for="phone-last4-input" class="block mb-1 text-sm font-medium">手機末 4 碼</label>
+        <input
+          type="tel"
+          id="phone-last4-input"
+          placeholder="例：1234"
+          pattern="[0-9]{4}"
+          maxlength="4"
+          inputmode="numeric"
+          class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white font-mono focus:border-mango-500 outline-none"
+          autocomplete="off"
+        />
+      </div>
       <button
         type="submit"
-        class="w-full bg-mango-500 hover:bg-mango-600 text-white font-semibold px-5 py-2 rounded-lg"
+        class="w-full bg-mango-500 hover:bg-mango-600 text-white font-semibold px-5 py-3 rounded-lg"
       >
         查詢
       </button>
