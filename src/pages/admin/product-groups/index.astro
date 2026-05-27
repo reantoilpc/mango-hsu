@@ -1,0 +1,358 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { makeDb } from "../../../db/client";
+import {
+  product_groups,
+  products,
+  seasons,
+  audit_log,
+} from "../../../db/schema";
+import { and, asc, desc, eq } from "drizzle-orm";
+import { env } from "../../../lib/env";
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+if (session.role !== "admin") {
+  return new Response("admin only", { status: 403 });
+}
+
+const db = makeDb(env);
+
+const activeSeasonRows = await db
+  .select()
+  .from(seasons)
+  .where(eq(seasons.status, "active"))
+  .limit(1);
+const activeSeason = activeSeasonRows[0] ?? null;
+
+const groupRows = activeSeason
+  ? await db
+      .select()
+      .from(product_groups)
+      .where(eq(product_groups.season_id, activeSeason.id))
+      .orderBy(asc(product_groups.display_order), asc(product_groups.slug))
+  : [];
+
+const skuRows = activeSeason
+  ? await db
+      .select({
+        sku: products.sku,
+        variant: products.variant,
+        package_fen: products.package_fen,
+        available: products.available,
+        group_id: products.group_id,
+      })
+      .from(products)
+      .where(eq(products.season_id, activeSeason.id))
+      .orderBy(asc(products.group_id), asc(products.package_fen))
+  : [];
+
+const skusByGroup = new Map<number, typeof skuRows>();
+for (const s of skuRows) {
+  const list = skusByGroup.get(s.group_id) ?? [];
+  list.push(s);
+  skusByGroup.set(s.group_id, list);
+}
+
+const recentIntake = await db
+  .select()
+  .from(audit_log)
+  .where(eq(audit_log.action, "group_stock_change"))
+  .orderBy(desc(audit_log.ts))
+  .limit(20);
+
+interface IntakeDetails {
+  reason?: string;
+  group_id?: number;
+  delta_fen?: number;
+  before_fen?: number;
+  after_fen?: number;
+  intake_reason?: string;
+}
+
+function parseDetails(raw: string | null): IntakeDetails {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as IntakeDetails;
+  } catch {
+    return {};
+  }
+}
+
+const groupNameById = new Map(groupRows.map((g) => [g.id, g.name]));
+
+function fenToJin(fen: number): string {
+  return (fen / 100).toFixed(2);
+}
+---
+
+<Layout title="庫存池管理">
+  <main class="mx-auto max-w-3xl px-4 py-6 pb-12">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">庫存池（進貨）</h1>
+      <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
+    </header>
+
+    <p class="mb-4 text-sm text-gray-600">
+      V5.2：每個品種共用一個重量池（fen，1 fen = 0.01 斤）。
+      下訂時系統會自動依 SKU 的包裝大小（如半斤=50、1 斤=100）從這個池扣 fen。
+      <br />
+      進貨／校正請填「斤」(可用小數，例如 30 或 0.5)，正數=進貨，負數=校正/報廢。
+      所有變動會記入變更紀錄。
+    </p>
+
+    {activeSeason ? (
+      <p class="mb-6 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        當季：<strong>{activeSeason.name}</strong>（{activeSeason.code}）
+      </p>
+    ) : (
+      <p class="mb-6 rounded bg-red-50 px-3 py-2 text-sm text-red-800">
+        ⚠️ 找不到 status='active' 的 seasons 紀錄。請先設定當季。
+      </p>
+    )}
+
+    <section class="space-y-4">
+      {groupRows.map((g) => {
+        const skus = skusByGroup.get(g.id) ?? [];
+        return (
+          <article
+            class="rounded border border-gray-200 bg-white p-4"
+            data-group-card
+            data-group-id={g.id}
+            data-current-fen={g.stock_fen}
+          >
+            <header class="mb-3 flex items-baseline justify-between">
+              <div>
+                <h2 class="text-lg font-bold">{g.name}</h2>
+                <div class="font-mono text-xs text-gray-500">{g.slug}</div>
+              </div>
+              <div class="text-right">
+                <div class="text-2xl font-bold text-mango-700" data-current-jin>
+                  {fenToJin(g.stock_fen)} 斤
+                </div>
+                <div class="text-xs text-gray-500" data-current-fen-label>
+                  ({g.stock_fen} fen)
+                </div>
+              </div>
+            </header>
+
+            {skus.length > 0 && (
+              <div class="mb-3 text-xs text-gray-600">
+                包含 SKU：
+                {skus.map((s, i) => (
+                  <span>
+                    {i > 0 && "、"}
+                    <span class="font-mono">{s.sku}</span>
+                    （{s.variant}，{fenToJin(s.package_fen)} 斤/包
+                    {!s.available && "，已下架"}）
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <form
+              class="intake-form grid grid-cols-1 gap-2 sm:grid-cols-[6rem_1fr_5rem]"
+              data-intake-form
+            >
+              <input
+                type="number"
+                name="delta_jin"
+                step="0.01"
+                required
+                aria-label={`${g.name} 進貨斤數（正或負）`}
+                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                placeholder="例：30 或 -0.5"
+              />
+              <input
+                type="text"
+                name="reason"
+                required
+                maxlength="200"
+                aria-label={`${g.name} 進貨原因`}
+                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                placeholder="原因（例：今日進貨 30 斤、抽真空時破損 -0.5 斤）"
+              />
+              <button
+                type="submit"
+                class="inline-flex items-center justify-center rounded bg-mango-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
+              >
+                送出
+              </button>
+              <div
+                class="intake-error hidden sm:col-span-3 rounded bg-red-50 px-3 py-2 text-xs text-red-800"
+              ></div>
+            </form>
+          </article>
+        );
+      })}
+
+      {groupRows.length === 0 && activeSeason && (
+        <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+          當季尚無品種。請先到「商品管理」建立 SKU（會自動建立 group）。
+        </p>
+      )}
+    </section>
+
+    {recentIntake.length > 0 && (
+      <section class="mt-10">
+        <h2 class="mb-3 text-lg font-bold">最近 20 筆庫存變動</h2>
+        <ul class="divide-y divide-gray-200 rounded border border-gray-200">
+          {recentIntake.map((row) => {
+            const d = parseDetails(row.details);
+            const groupName = d.group_id ? groupNameById.get(d.group_id) ?? `group#${d.group_id}` : "?";
+            const sign = (d.delta_fen ?? 0) >= 0 ? "+" : "";
+            const delta = d.delta_fen ?? 0;
+            const colorClass = delta >= 0 ? "text-emerald-700" : "text-red-700";
+            return (
+              <li class="px-4 py-3 text-sm">
+                <div class="flex flex-wrap items-baseline justify-between gap-2">
+                  <div>
+                    <span class={`font-mono ${colorClass}`}>
+                      {sign}{fenToJin(delta)} 斤
+                    </span>
+                    <span class="ml-2 text-gray-700">{groupName}</span>
+                    <span class="ml-2 text-xs text-gray-500">[{d.reason ?? "?"}]</span>
+                  </div>
+                  <div class="text-xs text-gray-500">
+                    {row.ts.slice(0, 19).replace("T", " ")} UTC ／ {row.user_email}
+                  </div>
+                </div>
+                {d.intake_reason && (
+                  <div class="mt-1 text-xs text-gray-600">原因：{d.intake_reason}</div>
+                )}
+                {d.before_fen !== undefined && d.after_fen !== undefined && (
+                  <div class="mt-1 text-xs text-gray-500">
+                    {fenToJin(d.before_fen)} 斤 → {fenToJin(d.after_fen)} 斤
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    )}
+  </main>
+
+  <script>
+    import { showToast, flashToast, consumeFlash } from "../../../lib/toast";
+
+    interface IntakeOk {
+      ok: true;
+      group_id: number;
+      delta_fen: number;
+      new_pool_fen: number;
+      replayed?: boolean;
+    }
+    interface IntakeFail {
+      ok: false;
+      error_code: string;
+      message?: string;
+      current_pool_fen?: number;
+    }
+
+    document.querySelectorAll<HTMLFormElement>("[data-intake-form]").forEach((form) => {
+      const card = form.closest("[data-group-card]") as HTMLElement | null;
+      if (!card) return;
+      const groupId = Number(card.dataset.groupId);
+      const errEl = form.querySelector<HTMLElement>(".intake-error")!;
+      const submitBtn = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+      const deltaInput = form.querySelector<HTMLInputElement>('input[name="delta_jin"]')!;
+      const reasonInput = form.querySelector<HTMLInputElement>('input[name="reason"]')!;
+
+      function showErr(msg: string): void {
+        errEl.textContent = msg;
+        errEl.classList.remove("hidden");
+      }
+      function clearErr(): void {
+        errEl.textContent = "";
+        errEl.classList.add("hidden");
+      }
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        clearErr();
+
+        const deltaJin = Number(deltaInput.value);
+        const reason = reasonInput.value.trim();
+        if (!Number.isFinite(deltaJin) || deltaJin === 0) {
+          showErr("斤數需為非零數字（例：30 或 -0.5）");
+          return;
+        }
+        // 0.01 斤 = 1 fen. Multiply + round to nearest integer fen.
+        const deltaFen = Math.round(deltaJin * 100);
+        if (deltaFen === 0) {
+          showErr("變動小於 0.01 斤無意義");
+          return;
+        }
+        if (reason.length === 0) {
+          showErr("請填原因");
+          return;
+        }
+
+        const expectedFen = Number(card.dataset.currentFen);
+
+        submitBtn.disabled = true;
+        const originalLabel = submitBtn.textContent;
+        submitBtn.textContent = "處理中...";
+
+        try {
+          const res = await fetch(
+            `/api/admin/product-groups/${groupId}/intake`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({
+                delta_fen: deltaFen,
+                expected_pool_fen: expectedFen,
+                reason,
+                idempotency_key: crypto.randomUUID(),
+              }),
+            },
+          );
+
+          const ct = res.headers.get("content-type") ?? "";
+          if (!ct.includes("application/json")) {
+            showErr(`伺服器回應異常 (${res.status})：${await res.text()}`);
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalLabel;
+            return;
+          }
+
+          const data = (await res.json()) as IntakeOk | IntakeFail;
+          if (res.ok && "ok" in data && data.ok) {
+            flashToast(
+              data.replayed
+                ? `已套用過（重送）：${(deltaFen / 100).toFixed(2)} 斤`
+                : `已記錄：${(deltaFen / 100).toFixed(2)} 斤，新池 ${(data.new_pool_fen / 100).toFixed(2)} 斤`,
+              { kind: "success" },
+            );
+            location.reload();
+            return;
+          }
+
+          const fail = data as IntakeFail;
+          if (fail.error_code === "STALE_STATE") {
+            showErr(
+              `庫存池在你載入後被其他人改過。目前池：${((fail.current_pool_fen ?? 0) / 100).toFixed(2)} 斤。重新整理頁面後再試。`,
+            );
+          } else if (fail.error_code === "INVALID_DELTA") {
+            showErr(
+              `這個變動會讓池子變負數。目前 ${((fail.current_pool_fen ?? 0) / 100).toFixed(2)} 斤。`,
+            );
+          } else {
+            showErr(`失敗 (${fail.error_code})：${fail.message ?? "?"}`);
+          }
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
+        } catch {
+          showErr("網路錯誤，請稍後再試。");
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
+        }
+      });
+    });
+
+    consumeFlash();
+  </script>
+</Layout>

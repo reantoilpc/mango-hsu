@@ -97,12 +97,20 @@ const recent = await db
         訂單列表
       </a>
       {session.role === "admin" && (
-        <a
-          href="/admin/products"
-          class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"
-        >
-          商品管理
-        </a>
+        <>
+          <a
+            href="/admin/products"
+            class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"
+          >
+            商品管理
+          </a>
+          <a
+            href="/admin/product-groups"
+            class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"
+          >
+            庫存池（進貨）
+          </a>
+        </>
       )}
       <a
         href="/admin/audit"
