@@ -81,6 +81,11 @@
           "binding": "DB",
           "database_name": "mango-hsu-prod",
           "database_id": "5e62f4ee-1cd6-4495-b476-b95fa756e2c8"
+        },
+        {
+          "binding": "DB_STAGE",
+          "database_name": "mango-hsu-stage",
+          "database_id": "abd4a95a-ba94-4a32-851d-c5eeb13199c0"
         }
       ],
       "triggers": {
