@@ -23,7 +23,10 @@ const productRows = await db
   <main class="mx-auto max-w-3xl px-4 py-6 pb-32">
     <header class="mb-6 flex items-center justify-between">
       <h1 class="text-2xl font-bold">商品管理</h1>
-      <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
+      <div class="flex gap-3 text-sm">
+        <a href="/admin/product-groups" class="text-mango-700 underline">庫存池（進貨）→</a>
+        <a href="/admin" class="text-gray-600 underline">← 後台首頁</a>
+      </div>
     </header>
 
     <p class="mb-4 text-sm text-gray-600">
@@ -31,7 +34,8 @@ const productRows = await db
       <br />
       「順序」= 商品在客人頁的排列順序（數字小的先），<strong>不是庫存</strong>。
       <br />
-      <strong>欄位變動（名稱/規格/價格/順序/上架）</strong>用底部統一儲存。<strong>庫存調整</strong>有額外的未出貨檢查，走每列的「調整」面板。
+      V5.2：<strong>庫存</strong>由「品種池」統一管理，請到
+      <a href="/admin/product-groups" class="text-mango-700 underline">庫存池（進貨）</a>頁面調整。
     </p>
 
     <ul
@@ -107,38 +111,6 @@ const productRows = await db
             </label>
           </div>
 
-          <details class="stock-adjust rounded border border-mango-200 bg-mango-50 px-3 py-2 text-sm" data-sku={p.sku} data-current-stock={p.stock}>
-            <summary class="cursor-pointer text-mango-800 min-h-[44px] flex items-center">
-              庫存 <span class="mx-1 font-semibold">{p.stock}</span> 包 ・ 調整
-            </summary>
-            <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[5rem_1fr_5rem]">
-              <input
-                type="number"
-                name="new_stock"
-                min="0"
-                max="9999"
-                value={p.stock}
-                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
-                placeholder="新庫存"
-                aria-label={`${p.sku} 新庫存`}
-              />
-              <input
-                type="text"
-                name="reason"
-                maxlength="200"
-                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
-                placeholder="原因（補貨 / 校正 / 壞貨報廢...）"
-                aria-label={`${p.sku} 庫存調整原因`}
-              />
-              <button
-                type="button"
-                class="stock-save-btn inline-flex items-center justify-center rounded bg-mango-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
-              >
-                儲存
-              </button>
-              <div class="stock-error hidden col-span-1 sm:col-span-3 text-xs text-red-700"></div>
-            </div>
-          </details>
         </li>
       ))}
       {productRows.length === 0 && (
@@ -148,42 +120,42 @@ const productRows = await db
 
     <section class="rounded border border-amber-200 bg-amber-50 p-4">
       <h2 class="mb-3 text-lg font-bold">新增商品</h2>
-      <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem] items-center gap-2 mb-1 px-1 text-xs font-medium text-amber-800">
+      <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem] items-center gap-2 mb-1 px-1 text-xs font-medium text-amber-800">
         <div>SKU</div>
         <div>名稱</div>
         <div>規格</div>
         <div>價格</div>
         <div>順序</div>
         <div class="text-center">上架</div>
-        <div></div>
       </div>
-      <form
-        id="create-form"
-        class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem_5rem]"
-      >
-        <input
-          type="text"
-          name="sku"
-          required
-          pattern="[A-Z0-9_-]+"
-          aria-label="SKU"
-          class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono"
-          placeholder="SKU"
-        />
-        <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="名稱" />
-        <input type="text" name="variant" required aria-label="規格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="規格" />
-        <input type="number" name="price" required min="0" aria-label="價格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="價格" />
-        <input type="number" name="display_order" required value="0" aria-label="順序" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="順序" />
-        <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
-          <input type="checkbox" name="available" checked />
-          <span>上架</span>
-        </label>
-        <button
-          type="submit"
-          class="col-span-2 inline-flex items-center justify-center rounded bg-amber-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-amber-700 sm:col-span-1"
-        >
-          新增
-        </button>
+      <form id="create-form" class="space-y-3">
+        <div class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem]">
+          <input
+            type="text"
+            name="sku"
+            required
+            pattern="[A-Z0-9_-]+"
+            aria-label="SKU"
+            class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono"
+            placeholder="SKU"
+          />
+          <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="名稱" />
+          <input type="text" name="variant" required aria-label="規格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="規格" />
+          <input type="number" name="price" required min="0" aria-label="價格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="價格" />
+          <input type="number" name="display_order" required value="0" aria-label="順序" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="順序" />
+          <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
+            <input type="checkbox" name="available" checked />
+            <span>上架</span>
+          </label>
+        </div>
+        <div class="flex justify-end">
+          <button
+            type="submit"
+            class="w-full sm:w-auto inline-flex items-center justify-center rounded bg-amber-600 px-6 py-2 min-h-[44px] text-sm font-medium text-white hover:bg-amber-700"
+          >
+            新增商品
+          </button>
+        </div>
       </form>
     </section>
   </main>
@@ -351,90 +323,6 @@ const productRows = await db
         e.preventDefault();
         e.returnValue = "";
       }
-    });
-
-    // ============ Stock adjust per-row (V4 flow, Open Q #6 destructive exception) ============
-    document.querySelectorAll<HTMLDetailsElement>(".stock-adjust").forEach((panel) => {
-      const sku = panel.dataset.sku!;
-      const newStockInput = panel.querySelector<HTMLInputElement>('input[name="new_stock"]')!;
-      const reasonInput = panel.querySelector<HTMLInputElement>('input[name="reason"]')!;
-      const saveBtn = panel.querySelector<HTMLButtonElement>(".stock-save-btn")!;
-      const errEl = panel.querySelector<HTMLElement>(".stock-error")!;
-
-      function showErr(msg: string): void {
-        errEl.textContent = msg;
-        errEl.classList.remove("hidden");
-      }
-      function clearErr(): void {
-        errEl.textContent = "";
-        errEl.classList.add("hidden");
-      }
-
-      async function submit(override: boolean): Promise<void> {
-        const new_stock = Number(newStockInput.value);
-        const reason = reasonInput.value.trim();
-        if (!Number.isInteger(new_stock) || new_stock < 0 || new_stock > 9999) {
-          showErr("新庫存須為 0-9999 整數");
-          return;
-        }
-        if (reason.length === 0) {
-          showErr("請填調整原因");
-          return;
-        }
-        saveBtn.disabled = true;
-        const original = saveBtn.textContent;
-        saveBtn.textContent = "儲存中...";
-        try {
-          const res = await fetch(`/api/admin/products/${encodeURIComponent(sku)}/stock`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify({ new_stock, reason, override_unshipped: override }),
-          });
-          const data = (await res.json().catch(() => ({}))) as {
-            ok?: boolean;
-            error_code?: string;
-            message?: string;
-            unshipped_total?: number;
-            current_stock?: number;
-          };
-          if (res.ok && data.ok) {
-            flashToast(`${sku} 庫存已更新`, { kind: "success" });
-            location.reload();
-            return;
-          }
-          if (data.error_code === "STOCK_BELOW_UNSHIPPED" && !override) {
-            const u = data.unshipped_total;
-            const c = data.current_stock;
-            // Destructive exception (Open Q #6): keep native confirm() for V5;
-            // modernization deferred to V6.
-            if (
-              confirm(
-                `未出貨單共 ${u} 包，新庫存 ${new_stock} 比這還少（目前 ${c} 包）。確定？\n` +
-                  `這通常表示你接受庫存資料跟未出貨承諾不一致——audit_log 會留紀錄。`,
-              )
-            ) {
-              await submit(true);
-              return;
-            }
-            saveBtn.disabled = false;
-            saveBtn.textContent = original;
-            return;
-          }
-          showErr(`儲存失敗：${data.message ?? data.error_code ?? res.status}`);
-          saveBtn.disabled = false;
-          saveBtn.textContent = original;
-        } catch {
-          showErr("網路錯誤，請稍後再試。");
-          saveBtn.disabled = false;
-          saveBtn.textContent = original;
-        }
-      }
-
-      saveBtn.addEventListener("click", async () => {
-        clearErr();
-        await submit(false);
-      });
     });
 
     // ============ Create new product (separate flow) ============
