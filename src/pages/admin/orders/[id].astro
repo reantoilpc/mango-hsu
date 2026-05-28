@@ -4,7 +4,7 @@ import StatusStepper from "../../../components/admin/StatusStepper.astro";
 import StickyBar from "../../../components/admin/StickyBar.astro";
 import Modal from "../../../components/admin/Modal.astro";
 import { makeDb } from "../../../db/client";
-import { orders, order_items, products, audit_log } from "../../../db/schema";
+import { orders, order_items, products, product_groups, audit_log } from "../../../db/schema";
 import { eq, desc } from "drizzle-orm";
 import { itemsToReadable, formatTaipei } from "../../../lib/formatters";
 import { env } from "../../../lib/env";
@@ -28,7 +28,25 @@ const itemRows = await db
   .select()
   .from(order_items)
   .where(eq(order_items.order_id, id));
-const productRows = await db.select().from(products);
+// V5.2: stock derived from product_groups.stock_fen / products.package_fen.
+// Inner-join to get the pool, then compute per-SKU available count so the
+// "add item" dropdown and qty caps see real numbers (was undefined before).
+const productJoined = await db
+  .select({
+    sku: products.sku,
+    name: products.name,
+    variant: products.variant,
+    package_fen: products.package_fen,
+    price: products.price,
+    available: products.available,
+    group_stock_fen: product_groups.stock_fen,
+  })
+  .from(products)
+  .innerJoin(product_groups, eq(products.group_id, product_groups.id));
+const productRows = productJoined.map((p) => ({
+  ...p,
+  stock: Math.floor(p.group_stock_fen / p.package_fen),
+}));
 const productMap = new Map(productRows.map((p) => [p.sku, p]));
 const items = itemRows.map((i) => ({ ...i, product: productMap.get(i.sku) }));
 
