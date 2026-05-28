@@ -84,7 +84,9 @@
         }
       ],
       "triggers": {
-        "crons": ["0 18 * * 0"]
+        // Cloudflare cron uses 1=MON..7=SUN (ISO 8601), NOT 0=SUN (Unix).
+        // "0 18 * * 0" was rejected as invalid; 7 is the right Sunday code.
+        "crons": ["0 18 * * 7"]
       }
     }
   }
