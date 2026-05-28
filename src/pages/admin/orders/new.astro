@@ -1,22 +1,39 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { makeDb } from "../../../db/client";
-import { products } from "../../../db/schema";
+import { products, product_groups } from "../../../db/schema";
 import { env } from "../../../lib/env";
 
 const session = Astro.locals.session;
 if (!session) return Astro.redirect("/admin/login");
 
 const db = makeDb(env);
+// V5.2: stock lives on product_groups as fen pool. Per-SKU available count
+// is derived: floor(group.stock_fen / sku.package_fen). Join needed so the
+// "剩 N 包" badge and the qty input's max attribute have a real number.
 // Show all SKUs the admin keeps on the menu — including stock=0 ones —
 // disabled-but-visible. Admin sees what's gone vs invisible-and-confusing.
 const productRows = await db
-  .select()
+  .select({
+    sku: products.sku,
+    name: products.name,
+    variant: products.variant,
+    package_fen: products.package_fen,
+    price: products.price,
+    available: products.available,
+    display_order: products.display_order,
+    group_stock_fen: product_groups.stock_fen,
+  })
   .from(products)
-  .where(undefined)
+  .innerJoin(product_groups, eq(products.group_id, product_groups.id))
   .orderBy(asc(products.display_order));
-const sellableProducts = productRows.filter((p) => p.available);
+const sellableProducts = productRows
+  .filter((p) => p.available)
+  .map((p) => ({
+    ...p,
+    stock: Math.floor(p.group_stock_fen / p.package_fen),
+  }));
 
 // V4 idempotency: render-time UUID protects against double-click submit.
 // Same key on two requests → second request's idempotency precheck replays
