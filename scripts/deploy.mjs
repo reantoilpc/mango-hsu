@@ -7,8 +7,9 @@
 //   bun run scripts/deploy.mjs stage
 //   bun run scripts/deploy.mjs prod
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 const STAGE = {
   name: "mango-hsu-stage",
@@ -73,6 +74,42 @@ if (cfg.allow_test_bypass) {
 
 writeFileSync(path, JSON.stringify(wrangler, null, 2));
 console.log(`patched dist/server/wrangler.json → ${target} (worker: ${cfg.name})`);
+
+// Guard: if .env.local lacks PUBLIC_ORDER_TOKEN at build time, Astro substitutes
+// the wrangler.jsonc placeholder "REPLACE_AT_BUILD_TIME" as the literal value
+// into the customer JS bundle (src/lib/api.ts reads import.meta.env.PUBLIC_ORDER_TOKEN).
+// Every customer order then fails server-side with INVALID_TOKEN, silently. Catch
+// it here. Scope: dist/client/ only — dist/server/wrangler.json's PUBLIC_ORDER_TOKEN
+// var carries the placeholder by design (server never reads it; auth uses env.ORDER_TOKEN
+// secret instead), so a hit there is benign.
+const PLACEHOLDER = "REPLACE_AT_BUILD_TIME";
+function findPlaceholderIn(dir) {
+  const hits = [];
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      hits.push(...findPlaceholderIn(full));
+    } else if (
+      /\.(mjs|js|html)$/.test(name) &&
+      readFileSync(full, "utf8").includes(PLACEHOLDER)
+    ) {
+      hits.push(full);
+    }
+  }
+  return hits;
+}
+const placeholderHits = findPlaceholderIn("dist/client");
+if (placeholderHits.length > 0) {
+  console.error(
+    `\n✗ aborting deploy — '${PLACEHOLDER}' still in client bundle after build.\n` +
+      `  Files: ${placeholderHits.join(", ")}\n` +
+      `  Cause: .env.local is missing PUBLIC_ORDER_TOKEN, so import.meta.env.PUBLIC_ORDER_TOKEN\n` +
+      `  resolved to the wrangler.jsonc placeholder. Set PUBLIC_ORDER_TOKEN in .env.local\n` +
+      `  to the target env's ORDER_TOKEN secret value, then re-run.\n`,
+  );
+  process.exit(1);
+}
 
 const result = spawnSync("bunx", ["wrangler", "deploy"], {
   stdio: "inherit",

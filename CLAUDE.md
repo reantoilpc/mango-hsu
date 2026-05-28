@@ -23,7 +23,7 @@ Bun + wrangler. Full list in `package.json`; the ones used most:
 
 - `bun run dev` — Astro dev server with Cloudflare bindings via `platformProxy`
 - `bun run build` — type-check + build (also runs inside `deploy:*`)
-- `bun run deploy:stage` / `bun run deploy:prod` — build, then `scripts/deploy.mjs` patches `dist/server/wrangler.json` and runs `wrangler deploy`
+- `bun run deploy:stage` / `bun run deploy:prod` — build, then `scripts/deploy.mjs` patches `dist/server/wrangler.json` and runs `wrangler deploy`. Before either: `.env.local`'s `PUBLIC_ORDER_TOKEN` must equal the **target env's** `ORDER_TOKEN` wrangler secret. Stage and prod have different secrets, build is single-pass, so swap the active line in `.env.local` per cross-env deploy. The script aborts if `dist/client/` still contains the literal `REPLACE_AT_BUILD_TIME` (which means `.env.local` was missing the var entirely)
 - `bunx wrangler deploy --env cron --config wrangler.jsonc` — deploy the standalone cron worker. The `--config` flag is REQUIRED: without it, wrangler picks up Astro's leftover `dist/server/wrangler.json` (named `mango-hsu-stage` or `mango-hsu` from the last main-worker deploy), silently ignores `--env cron`, and redeploys the main worker instead of the cron. Cron schedule uses Cloudflare ISO weekday convention (1=MON..7=SUN), not Unix (0=SUN) — `0 18 * * 7` means Sunday 18:00 UTC.
 - `bun run db:generate` — regenerate Drizzle migration after editing `src/db/schema.ts`
 - `bun run db:migrate:stage` / `bun run db:migrate:prod` — apply migrations to D1 (remote)
