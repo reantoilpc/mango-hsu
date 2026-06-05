@@ -1,6 +1,7 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
 import StickyBar from "../../../components/admin/StickyBar.astro";
+import AdminForbidden from "../../../components/admin/AdminForbidden.astro";
 import { makeDb } from "../../../db/client";
 import { products, product_groups, seasons } from "../../../db/schema";
 import { asc, eq } from "drizzle-orm";
@@ -8,8 +9,9 @@ import { env } from "../../../lib/env";
 
 const session = Astro.locals.session;
 if (!session) return Astro.redirect("/admin/login");
-if (session.role !== "admin") {
-  return new Response("admin only", { status: 403 });
+const forbidden = session.role !== "admin";
+if (forbidden) {
+  Astro.response.status = 403;
 }
 
 const db = makeDb(env);
@@ -60,6 +62,9 @@ const PACKAGE_OPTIONS: Array<{ fen: number; label: string }> = [
 const preselectGroup = Astro.url.searchParams.get("group") ?? "";
 ---
 
+{forbidden ? (
+  <AdminForbidden reason="商品管理只有管理員（admin）能進入。" />
+) : (
 <Layout title="商品管理">
   <main class="mx-auto max-w-3xl px-4 py-6 pb-32">
     <header class="mb-6 flex items-center justify-between">
@@ -497,3 +502,4 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
     consumeFlash();
   </script>
 </Layout>
+)}

@@ -1,0 +1,27 @@
+---
+// V6 §5.7 — friendly "no permission" page. Renders a full Layout body with an
+// explanation and links back. The PAGE that uses it must set the 403 status via
+// `Astro.response.status = 403` (Astro pages can't both render a template and
+// return a Response, so status is set on Astro.response).
+import Layout from "../../layouts/Layout.astro";
+interface Props {
+  reason?: string;
+}
+const { reason = "這個頁面只有管理員（admin）能進入。" } = Astro.props;
+---
+
+<Layout title="沒有權限">
+  <main class="mx-auto max-w-md px-4 py-16 text-center">
+    <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6 text-amber-600" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+      </svg>
+    </div>
+    <h1 class="mb-2 text-xl font-bold">沒有權限</h1>
+    <p class="mb-6 text-sm text-gray-600">{reason}</p>
+    <div class="flex justify-center gap-3">
+      <a href="/admin" class="rounded bg-mango-600 px-4 py-2 text-sm text-white hover:bg-mango-700">回後台首頁</a>
+      <a href="/admin/orders" class="rounded border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50">前往訂單</a>
+    </div>
+  </main>
+</Layout>

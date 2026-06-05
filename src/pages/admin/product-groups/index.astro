@@ -1,5 +1,6 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
+import AdminForbidden from "../../../components/admin/AdminForbidden.astro";
 import { makeDb } from "../../../db/client";
 import {
   product_groups,
@@ -12,8 +13,9 @@ import { env } from "../../../lib/env";
 
 const session = Astro.locals.session;
 if (!session) return Astro.redirect("/admin/login");
-if (session.role !== "admin") {
-  return new Response("admin only", { status: 403 });
+const forbidden = session.role !== "admin";
+if (forbidden) {
+  Astro.response.status = 403;
 }
 
 const db = makeDb(env);
@@ -86,6 +88,9 @@ function fenToJin(fen: number): string {
 }
 ---
 
+{forbidden ? (
+  <AdminForbidden reason="品種庫存只有管理員（admin）能進入。" />
+) : (
 <Layout title="庫存池管理">
   <main class="mx-auto max-w-3xl px-4 py-6 pb-12">
     <header class="mb-6 flex items-center justify-between">
@@ -759,3 +764,4 @@ function fenToJin(fen: number): string {
     consumeFlash();
   </script>
 </Layout>
+)}
