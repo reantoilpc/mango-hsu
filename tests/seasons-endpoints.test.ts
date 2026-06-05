@@ -149,3 +149,88 @@ describe("POST /api/admin/seasons", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// --- PATCH /api/admin/seasons/:id/activate --------------------------------
+
+describe("PATCH /api/admin/seasons/:id/activate", () => {
+  it("atomically demotes old active → archived and promotes target → active", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+
+    // Arrange: one active season + one draft target. seedActiveSeasonScenario
+    // archives stage's real 2026 first, then makes SEASON_OLD_ACTIVE active.
+    seedActiveSeasonScenario({
+      season_code: SEASON_OLD_ACTIVE,
+      group_slug: "test-se-grp",
+      initial_stock_fen: 0,
+      skus: [],
+    });
+    const targetId = seedSeason({ code: SEASON_TO_ACTIVATE, status: "draft" });
+
+    const res = await patchSeason(cookie, targetId, "activate");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+
+    // Old active is now archived; target is now active; still exactly one active.
+    expect(seasonRow(SEASON_OLD_ACTIVE)?.status).toBe("archived");
+    expect(seasonRow(SEASON_TO_ACTIVATE)?.status).toBe("active");
+
+    const activeCount = d1Execute(
+      `SELECT count(*) AS n FROM seasons WHERE status = 'active'`,
+    ) as Array<{ n: number }>;
+    expect(activeCount[0]!.n).toBe(1);
+
+    // audit season_activate written for the target.
+    const audit = d1Execute(
+      `SELECT count(*) AS n FROM audit_log
+        WHERE action = 'season_activate' AND season_id = ${targetId}`,
+    ) as Array<{ n: number }>;
+    expect(audit[0]!.n).toBe(1);
+  });
+
+  it("activating an already-active season is idempotent (ok)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const { season_id } = seedActiveSeasonScenario({
+      season_code: SEASON_OLD_ACTIVE,
+      group_slug: "test-se-grp",
+      initial_stock_fen: 0,
+      skus: [],
+    });
+
+    const res = await patchSeason(cookie, season_id, "activate");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; already_active?: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.already_active).toBe(true);
+    expect(seasonRow(SEASON_OLD_ACTIVE)?.status).toBe("active");
+  });
+
+  it("activating an archived season works (archived → active, no old active exists)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    // No active season at all: archive stage's 2026 so the slot is free.
+    d1Execute(`UPDATE seasons SET status = 'archived' WHERE status = 'active'`);
+    const id = seedSeason({ code: SEASON_TO_ACTIVATE, status: "archived" });
+
+    const res = await patchSeason(cookie, id, "activate");
+    expect(res.status).toBe(200);
+    expect(seasonRow(SEASON_TO_ACTIVATE)?.status).toBe("active");
+  });
+
+  it("404 for unknown season id", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const res = await patchSeason(cookie, 999999999, "activate");
+    expect(res.status).toBe(404);
+  });
+
+  it("CSRF: missing Origin rejected (403)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const id = seedSeason({ code: SEASON_TO_ACTIVATE, status: "draft" });
+    const res = await patchSeason(cookie, id, "activate", {}, { origin: false });
+    expect(res.status).toBe(403);
+  });
+});
