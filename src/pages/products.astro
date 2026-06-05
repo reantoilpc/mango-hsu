@@ -43,17 +43,15 @@ const settings = await loadSiteSettings(env);
       <div>
         <h3 class="font-semibold text-base mb-1">運費怎麼算？</h3>
         <p class="text-mango-700">
-          滿 {settings.free_shipping_min_packages} 包免運，
-          不滿 {settings.free_shipping_min_packages} 包統一加
-          ${settings.shipping_fee_twd} 運費。
+          每筆訂單運費 ${settings.shipping_fee_twd} 元。
         </p>
       </div>
 
       <div>
         <h3 class="font-semibold text-base mb-1">多久可以收到？</h3>
         <p class="text-mango-700">
-          收到款項後 {settings.eta_days_after_payment} 個工作天內出貨。
-          出貨後我們會在訂單狀態頁更新宅配單號，你也會收到 LINE 通知。
+          出貨時間會依當期訂單數量調整，不另設固定工作天。
+          出貨後我們會在訂單狀態頁更新宅配單號，並透過 LINE 通知你——請以 LINE 通知為準。
         </p>
       </div>
 
@@ -93,7 +91,7 @@ const settings = await loadSiteSettings(env);
       <div>
         <h3 class="font-semibold text-base mb-1">保存建議？</h3>
         <p class="text-mango-700">
-          未開封常溫可保存 6 個月；開封後請放冷藏、2 週內食用完畢。
+          常溫可保存 6 個月；因為天然不加糖，所以會退色，這是正常現象。
         </p>
       </div>
     </div>

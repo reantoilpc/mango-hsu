@@ -9,7 +9,6 @@ const settings = await loadSiteSettings(env);
 const sellable = settings.products.filter(
   (p) => p.available && p.derived_available_count > 0,
 );
-const freeShipMin = settings.free_shipping_min_packages;
 const shipFee = settings.shipping_fee_twd;
 ---
 
@@ -44,14 +43,13 @@ const shipFee = settings.shipping_fee_twd;
         <>
           <h1 class="text-3xl font-bold mb-1">下訂</h1>
           <p class="text-mango-700 mb-8 text-sm">
-            滿 {freeShipMin} 包免運，不滿 {freeShipMin} 包加 ${shipFee} 運費。
+            每筆訂單運費 ${shipFee} 元。
           </p>
 
           <form
             id="order-form"
             class="space-y-5"
             novalidate
-            data-free-ship-min={freeShipMin}
             data-ship-fee={shipFee}
           >
             <div>
@@ -277,7 +275,7 @@ const shipFee = settings.shipping_fee_twd;
 
             <div class="bg-white rounded-xl border border-mango-200 p-6 text-sm space-y-2">
               <p>
-                📦 收到款項後 <span id="c-eta"></span> 個工作天內出貨。
+                📦 出貨時間視當期訂單量而定，出貨後我們會以 LINE 通知你並更新宅配單號。
               </p>
               <p>
                 🔗 之後可以從
@@ -308,8 +306,7 @@ const shipFee = settings.shipping_fee_twd;
 
   const form = document.getElementById("order-form") as HTMLFormElement | null;
   if (form) {
-    const freeShipMin = Number(form.dataset.freeShipMin ?? 10);
-    const shipFee = Number(form.dataset.shipFee ?? 80);
+    const shipFee = Number(form.dataset.shipFee ?? 150);
 
     const qtyInputs = form.querySelectorAll<HTMLInputElement>(".item-qty");
     const subtotalEl = document.getElementById("subtotal") as HTMLElement;
@@ -338,10 +335,10 @@ const shipFee = settings.shipping_fee_twd;
 
     function recomputeSummary() {
       const { totalQty, subtotal } = computeItems();
-      const shipping = totalQty >= freeShipMin ? 0 : totalQty > 0 ? shipFee : 0;
+      const shipping = totalQty > 0 ? shipFee : 0;
       const total = subtotal + shipping;
       subtotalEl.textContent = `$${subtotal}`;
-      shippingEl.textContent = totalQty >= freeShipMin && totalQty > 0 ? `免運` : `$${shipping}`;
+      shippingEl.textContent = `$${shipping}`;
       totalEl.textContent = `$${total}`;
     }
 
@@ -420,12 +417,11 @@ const shipFee = settings.shipping_fee_twd;
       confirmation.classList.remove("hidden");
       (document.getElementById("c-order-id") as HTMLElement).textContent = res.order_id;
       (document.getElementById("c-subtotal") as HTMLElement).textContent = `$${res.subtotal}`;
-      (document.getElementById("c-shipping") as HTMLElement).textContent = res.shipping === 0 ? "免運" : `$${res.shipping}`;
+      (document.getElementById("c-shipping") as HTMLElement).textContent = `$${res.shipping}`;
       (document.getElementById("c-total") as HTMLElement).textContent = `$${res.total}`;
       (document.getElementById("c-bank") as HTMLElement).textContent = res.bank_account_display;
       (document.getElementById("c-amount") as HTMLElement).textContent = `$${res.total}`;
       (document.getElementById("c-memo") as HTMLElement).textContent = res.expected_memo;
-      (document.getElementById("c-eta") as HTMLElement).textContent = String(res.eta_days_after_payment);
       (document.getElementById("c-status-link") as HTMLAnchorElement).href = res.status_url;
 
       // LINE bind section. cso 2026-05-03 finding #5: prior implementation
