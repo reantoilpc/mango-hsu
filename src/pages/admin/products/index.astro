@@ -173,8 +173,13 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
                 </li>
               ))}
               {groupProducts.length === 0 && (
-                <li class="px-4 py-6 text-center text-sm text-gray-500">
-                  此群組尚無商品。用下方「新增商品」並選此群組來建立。
+                <li class="px-4 py-8 text-center text-sm text-gray-500">
+                  <p class="mb-1 font-medium text-gray-700">還沒有任何商品</p>
+                  <p>下一步：用下方「新增商品」表單建立第一個品項（記得選所屬品種與包裝大小）。</p>
+                  <p class="mt-1">建立後可到
+                    <a href="/admin/product-groups" class="text-mango-700 underline">品種庫存</a>
+                    進貨。
+                  </p>
                 </li>
               )}
             </ul>
