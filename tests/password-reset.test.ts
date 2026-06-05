@@ -14,9 +14,14 @@ import {
   cleanupTestAdmin,
   clearResetRateLimit,
   getResetTokenRow,
+  getAdminPasswordHash,
+  countSessions,
+  seedSessionFor,
+  setResetToken,
   seedAdminUser,
   skipIfNoIntegration,
 } from "./_setup";
+import { sha256Hex, generateResetToken } from "../src/lib/auth";
 
 const SKIP = skipIfNoIntegration();
 const ADMIN_EMAIL = "test-reset-admin@local";
@@ -122,5 +127,128 @@ describe("V6 request-reset: rate limit 3/hr/email", () => {
     const r4 = await requestReset(ADMIN_EMAIL);
     expect(r4.status).toBe(200);
     expect((await r4.json())).toEqual({ ok: true });
+  });
+});
+
+async function submitReset(token: string, newPassword: string): Promise<Response> {
+  return fetch(`${STAGE_URL}/api/admin/auth/reset-password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: STAGE_URL, // pass requireSameOrigin
+    },
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
+describe("V6 reset-password: token validation", () => {
+  it("rejects an unknown token with 400 and audits invalid_token", async () => {
+    if (SKIP) return;
+    await seedAdminUser({ email: ADMIN_EMAIL, password: "old-password-123" });
+    // A well-formed but never-issued token.
+    const r = await submitReset("deadbeef".repeat(8), "brand-new-password-9");
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects an EXPIRED token with 400 and leaves the password unchanged", async () => {
+    if (SKIP) return;
+    await seedAdminUser({ email: ADMIN_EMAIL, password: "old-password-123" });
+    const hashBefore = getAdminPasswordHash(ADMIN_EMAIL);
+
+    // Install a known token whose expiry is in the PAST.
+    const { token, hash } = await generateResetToken();
+    const past = new Date(Date.now() - 60_000).toISOString();
+    setResetToken(ADMIN_EMAIL, hash, past);
+
+    const r = await submitReset(token, "brand-new-password-9");
+    expect(r.status).toBe(400);
+    // Password untouched.
+    expect(getAdminPasswordHash(ADMIN_EMAIL)).toBe(hashBefore);
+  });
+
+  it("rejects a too-short new password (min 12) with 400", async () => {
+    if (SKIP) return;
+    await seedAdminUser({ email: ADMIN_EMAIL, password: "old-password-123" });
+    const { token, hash } = await generateResetToken();
+    const future = new Date(Date.now() + 20 * 60_000).toISOString();
+    setResetToken(ADMIN_EMAIL, hash, future);
+
+    const r = await submitReset(token, "short");
+    expect(r.status).toBe(400);
+    // Token NOT consumed on a validation failure (user can retry with a longer password).
+    expect(getResetTokenRow(ADMIN_EMAIL).reset_token).toBe(hash);
+  });
+});
+
+describe("V6 reset-password: successful reset", () => {
+  it("changes password, clears token, wipes sessions, and audits success", async () => {
+    if (SKIP) return;
+    await seedAdminUser({ email: ADMIN_EMAIL, password: "old-password-123" });
+    const hashBefore = getAdminPasswordHash(ADMIN_EMAIL);
+
+    // Pre-existing sessions for this user (should be wiped by the reset).
+    seedSessionFor(ADMIN_EMAIL);
+    seedSessionFor(ADMIN_EMAIL);
+    expect(countSessions(ADMIN_EMAIL)).toBe(2);
+
+    // Install a valid (future-expiry) token.
+    const { token, hash } = await generateResetToken();
+    const future = new Date(Date.now() + 20 * 60_000).toISOString();
+    setResetToken(ADMIN_EMAIL, hash, future);
+
+    const r = await submitReset(token, "a-fresh-strong-password");
+    expect(r.status).toBe(200);
+    expect((await r.json())).toEqual({ ok: true });
+
+    // Password hash changed.
+    expect(getAdminPasswordHash(ADMIN_EMAIL)).not.toBe(hashBefore);
+    // Token cleared (link is now single-use / dead).
+    const row = getResetTokenRow(ADMIN_EMAIL);
+    expect(row.reset_token).toBeNull();
+    expect(row.reset_token_expires_at).toBeNull();
+    // All sessions wiped.
+    expect(countSessions(ADMIN_EMAIL)).toBe(0);
+  });
+
+  it("a consumed token cannot be reused (second submit fails 400)", async () => {
+    if (SKIP) return;
+    await seedAdminUser({ email: ADMIN_EMAIL, password: "old-password-123" });
+    const { token, hash } = await generateResetToken();
+    const future = new Date(Date.now() + 20 * 60_000).toISOString();
+    setResetToken(ADMIN_EMAIL, hash, future);
+
+    const r1 = await submitReset(token, "first-new-password-12");
+    expect(r1.status).toBe(200);
+    // Reuse the same plaintext token → token already cleared → not found → 400.
+    const r2 = await submitReset(token, "second-new-password-12");
+    expect(r2.status).toBe(400);
+  });
+
+  it("the new password actually works at /admin/login (end-to-end)", async () => {
+    if (SKIP) return;
+    await seedAdminUser({ email: ADMIN_EMAIL, password: "old-password-123" });
+    const { token, hash } = await generateResetToken();
+    const future = new Date(Date.now() + 20 * 60_000).toISOString();
+    setResetToken(ADMIN_EMAIL, hash, future);
+
+    const newPw = "login-after-reset-pw";
+    expect((await submitReset(token, newPw)).status).toBe(200);
+
+    // Log in with the NEW password via the real login form POST.
+    const form = new URLSearchParams();
+    form.set("email", ADMIN_EMAIL);
+    form.set("password", newPw);
+    const login = await fetch(`${STAGE_URL}/admin/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: STAGE_URL,
+      },
+      body: form.toString(),
+      redirect: "manual",
+    });
+    // Successful login → 302 redirect + Set-Cookie mh_session.
+    expect(login.status).toBe(302);
+    expect(login.headers.get("set-cookie") ?? "").toContain("mh_session=");
   });
 });
