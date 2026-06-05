@@ -186,21 +186,99 @@ function fenToJin(fen: number): string {
             data-group-card
             data-group-id={g.id}
             data-current-fen={g.stock_fen}
+            data-group-name={g.name}
+            data-group-available={g.available ? "1" : "0"}
+            data-group-display-order={g.display_order}
           >
             <header class="mb-3 flex items-baseline justify-between">
               <div>
-                <h2 class="text-lg font-bold">{g.name}</h2>
-                <div class="font-mono text-xs text-gray-500">{g.slug}</div>
+                <div class="flex items-center gap-2">
+                  <h2 class="text-lg font-bold" data-group-name-display>{g.name}</h2>
+                  {g.available ? (
+                    <span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                      上架中
+                    </span>
+                  ) : (
+                    <span class="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
+                      已下架
+                    </span>
+                  )}
+                </div>
+                <div class="font-mono text-xs text-gray-500">品種代碼：{g.slug}</div>
               </div>
               <div class="text-right">
                 <div class="text-2xl font-bold text-mango-700" data-current-jin>
                   {fenToJin(g.stock_fen)} 斤
                 </div>
-                <div class="text-xs text-gray-500" data-current-fen-label>
-                  ({g.stock_fen} fen)
-                </div>
               </div>
             </header>
+
+            <div class="mb-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-edit-toggle
+                class="inline-flex items-center justify-center rounded border border-gray-300 px-3 py-1.5 min-h-[36px] text-xs text-gray-700 hover:bg-gray-50"
+              >
+                編輯名稱／排序
+              </button>
+              <button
+                type="button"
+                data-toggle-available
+                data-available={g.available ? "1" : "0"}
+                class="inline-flex items-center justify-center rounded border px-3 py-1.5 min-h-[36px] text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                class:list={[
+                  g.available
+                    ? "border-amber-300 text-amber-700 hover:bg-amber-50"
+                    : "border-emerald-300 text-emerald-700 hover:bg-emerald-50",
+                ]}
+              >
+                {g.available ? "下架此品種" : "重新上架"}
+              </button>
+            </div>
+
+            <form data-edit-form class="mb-3 hidden space-y-2 rounded bg-gray-50 p-3">
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_5rem]">
+                <label class="block">
+                  <span class="mb-1 block text-[11px] text-gray-600">品種名稱</span>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    maxlength="50"
+                    value={g.name}
+                    aria-label={`${g.name} 改名`}
+                    class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                  />
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-[11px] text-gray-600">排序</span>
+                  <input
+                    type="number"
+                    name="display_order"
+                    min="0"
+                    value={g.display_order}
+                    aria-label={`${g.name} 排序`}
+                    class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                  />
+                </label>
+              </div>
+              <div class="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  data-edit-cancel
+                  class="inline-flex items-center justify-center rounded px-3 py-1.5 min-h-[36px] text-xs text-gray-600 hover:bg-gray-100"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  class="inline-flex items-center justify-center rounded bg-mango-600 px-4 py-1.5 min-h-[36px] text-xs text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
+                >
+                  儲存
+                </button>
+              </div>
+              <div data-edit-error class="hidden rounded bg-red-50 px-3 py-2 text-[11px] text-red-800"></div>
+            </form>
 
             {skus.length > 0 && (
               <div class="mb-3 text-xs text-gray-600">
@@ -514,6 +592,151 @@ function fenToJin(fen: number): string {
         }
       });
     }
+
+    // ============ Edit / toggle-available per group (V6 P6 §5.2) ============
+    interface GroupUpdateOk {
+      ok: true;
+      group_id: number;
+      changed: string[];
+    }
+    interface GroupUpdateFail {
+      ok: false;
+      error_code: string;
+      message?: string;
+      current?: { name: string; available: boolean; display_order: number };
+    }
+
+    async function patchGroup(
+      groupId: number,
+      payload: {
+        name?: string;
+        available?: boolean;
+        display_order?: number;
+        expected: { name: string; available: boolean; display_order: number };
+      },
+    ): Promise<{ res: Response; data: GroupUpdateOk | GroupUpdateFail | null }> {
+      const res = await fetch(`/api/admin/product-groups/${groupId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      const ct = res.headers.get("content-type") ?? "";
+      const data = ct.includes("application/json")
+        ? ((await res.json()) as GroupUpdateOk | GroupUpdateFail)
+        : null;
+      return { res, data };
+    }
+
+    document.querySelectorAll<HTMLElement>("[data-group-card]").forEach((card) => {
+      const groupId = Number(card.dataset.groupId);
+      const expected = {
+        name: card.dataset.groupName ?? "",
+        available: card.dataset.groupAvailable === "1",
+        display_order: Number(card.dataset.groupDisplayOrder ?? 0),
+      };
+
+      // --- inline edit (name / display_order) ---
+      const editToggle = card.querySelector<HTMLButtonElement>("[data-edit-toggle]");
+      const editForm = card.querySelector<HTMLFormElement>("[data-edit-form]");
+      const editCancel = card.querySelector<HTMLButtonElement>("[data-edit-cancel]");
+      const editErr = card.querySelector<HTMLElement>("[data-edit-error]");
+
+      function editShowErr(msg: string): void {
+        if (!editErr) return;
+        editErr.textContent = msg;
+        editErr.classList.remove("hidden");
+      }
+      function editClearErr(): void {
+        if (!editErr) return;
+        editErr.textContent = "";
+        editErr.classList.add("hidden");
+      }
+
+      editToggle?.addEventListener("click", () => {
+        editForm?.classList.toggle("hidden");
+        editClearErr();
+      });
+      editCancel?.addEventListener("click", () => {
+        editForm?.classList.add("hidden");
+        editClearErr();
+      });
+
+      editForm?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        editClearErr();
+        const fd = new FormData(editForm);
+        const name = String(fd.get("name") ?? "").trim();
+        const displayOrder = Number(fd.get("display_order") ?? 0);
+        if (!name) {
+          editShowErr("請填品種名稱");
+          return;
+        }
+        const submitBtn = editForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        submitBtn.disabled = true;
+        const original = submitBtn.textContent;
+        submitBtn.textContent = "儲存中...";
+        try {
+          const { res, data } = await patchGroup(groupId, {
+            name,
+            display_order: Number.isFinite(displayOrder) ? displayOrder : 0,
+            expected,
+          });
+          if (res.ok && data && "ok" in data && data.ok) {
+            flashToast(`已更新「${name}」`, { kind: "success" });
+            location.reload();
+            return;
+          }
+          const fail = data as GroupUpdateFail | null;
+          if (fail?.error_code === "STALE_STATE") {
+            editShowErr("此品種在你載入後被其他人改過，請重新整理頁面再試。");
+          } else {
+            editShowErr(`儲存失敗 (${fail?.error_code ?? res.status})：${fail?.message ?? "?"}`);
+          }
+          submitBtn.disabled = false;
+          submitBtn.textContent = original;
+        } catch {
+          editShowErr("網路錯誤，請稍後再試。");
+          submitBtn.disabled = false;
+          submitBtn.textContent = original;
+        }
+      });
+
+      // --- toggle available (上架/下架) ---
+      const toggleBtn = card.querySelector<HTMLButtonElement>("[data-toggle-available]");
+      toggleBtn?.addEventListener("click", async () => {
+        const currentlyAvailable = toggleBtn.dataset.available === "1";
+        const next = !currentlyAvailable;
+        if (!confirm(next ? `確定要重新上架「${expected.name}」？` : `確定要下架「${expected.name}」？下架後顧客端不會看到此品種。`)) {
+          return;
+        }
+        toggleBtn.disabled = true;
+        const original = toggleBtn.textContent;
+        toggleBtn.textContent = "處理中...";
+        try {
+          const { res, data } = await patchGroup(groupId, { available: next, expected });
+          if (res.ok && data && "ok" in data && data.ok) {
+            flashToast(next ? `已重新上架「${expected.name}」` : `已下架「${expected.name}」`, {
+              kind: "success",
+            });
+            location.reload();
+            return;
+          }
+          const fail = data as GroupUpdateFail | null;
+          if (fail?.error_code === "STALE_STATE") {
+            showToast("此品種在你載入後被其他人改過，請重新整理後再試。", { kind: "error" });
+          } else {
+            showToast(`操作失敗 (${fail?.error_code ?? res.status})`, { kind: "error" });
+          }
+          toggleBtn.disabled = false;
+          toggleBtn.textContent = original;
+        } catch {
+          showToast("網路錯誤，請稍後再試。", { kind: "error" });
+          toggleBtn.disabled = false;
+          toggleBtn.textContent = original;
+        }
+      });
+    });
 
     consumeFlash();
   </script>
