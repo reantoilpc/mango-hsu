@@ -71,7 +71,7 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
     </header>
 
     <p class="mb-4 text-sm text-gray-600">
-      下架某商品就把「上架」取消勾選；不要刪 SKU（會破壞舊訂單品項關聯）。
+      下架某商品就把「上架」取消勾選；不要刪商品編碼（會破壞舊訂單品項關聯）。
       <br />
       「順序」= 商品在客人頁的排列順序（數字小的先），<strong>不是庫存</strong>。
       <br />
@@ -94,7 +94,7 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
             </header>
 
             <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem] items-center gap-2 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
-              <div>SKU</div>
+              <div>商品編碼</div>
               <div>名稱</div>
               <div>規格</div>
               <div>價格</div>
@@ -206,7 +206,7 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
       {activeSeason && groupRows.length > 0 && (
         <>
           <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_7rem_6rem_4rem_5rem_4rem_4rem] items-center gap-2 mb-1 px-1 text-xs font-medium text-amber-800">
-            <div>SKU</div>
+            <div>商品編碼</div>
             <div>名稱</div>
             <div>所屬群組</div>
             <div>包裝</div>
@@ -222,9 +222,9 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
                 name="sku"
                 required
                 pattern="[A-Z0-9_-]+"
-                aria-label="SKU"
+                aria-label="商品編碼"
                 class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono"
-                placeholder="SKU"
+                placeholder="商品編碼"
               />
               <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="名稱" />
               <select
@@ -467,7 +467,7 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
         ...readForm(createForm),
       };
       if (!/^[A-Z0-9_-]+$/.test(data.sku)) {
-        showToast("SKU 只能大寫英數、底線、連字號", { kind: "error" });
+        showToast("商品編碼只能大寫英數、底線、連字號", { kind: "error" });
         return;
       }
       if (!/^[a-z0-9-]+$/.test(data.group_slug)) {

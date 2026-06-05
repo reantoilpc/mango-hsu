@@ -70,13 +70,15 @@ const INTERNAL_TOKENS = [
   "products.slug",
   "preselectGroup",
   "ngShowErr",
-  // 屬性 key（單純 attribute 名，值另外保留）
+  // 屬性 key / 物件成員（單純 attribute 名，值另外保留）
   "p.sku",
   "s.sku",
   "products.sku",
   "products.package_fen",
   ".sku",
   ".slug",
+  ".fen",
+  "o.fen",
   // HTML name= / pattern= 屬性名（後端依賴，非使用者文案）
   'name="slug"',
   'name="sku"',
