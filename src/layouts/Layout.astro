@@ -51,6 +51,7 @@ const isAdminShell = pathname.startsWith("/admin") && !!session;
         {isAdminShell ? (
           <nav class="flex flex-wrap items-center gap-0.5 sm:gap-1 text-sm justify-end">
             <a href="/admin/orders" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">訂單</a>
+            <a href="/admin/seasons" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">年度</a>
             <a href="/admin/products" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">商品</a>
             <a href="/admin/product-groups" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">
               <span class="sm:hidden">庫存</span>
