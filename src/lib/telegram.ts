@@ -62,3 +62,25 @@ export async function notifyOrder(
     });
   }
 }
+
+// V6 §5.6: generic Telegram push (forgot-password reset link, future alerts). Reuses the same
+// bot token + chat id as order notifications but with an arbitrary message body. Does NOT touch
+// notifyOrder (the live order-notification path stays untouched). Fire-and-forget friendly:
+// returns true on a 2xx send, false on misconfig/error — the caller decides whether to audit.
+// IMPORTANT: callers on a latency-sensitive path (request-reset) must NOT await this inside the
+// response path (it would leak email-existence via timing); kick it off and ignore the promise.
+export async function sendTelegramMessage(env: AppEnv, text: string): Promise<boolean> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const chatId = env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
