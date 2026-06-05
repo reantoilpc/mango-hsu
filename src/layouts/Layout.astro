@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import { navItemsForRole, activeNavKey, type AdminRole } from "../lib/admin-nav";
 
 interface Props {
   title?: string;
@@ -16,6 +17,10 @@ const {
 const pathname = Astro.url.pathname;
 const session = (Astro.locals as { session?: { email: string; role: string } }).session;
 const isAdminShell = pathname.startsWith("/admin") && !!session;
+const adminNavItems = isAdminShell
+  ? navItemsForRole((session!.role as AdminRole) === "admin" ? "admin" : "operator")
+  : [];
+const adminActiveKey = isAdminShell ? activeNavKey(pathname) : null;
 ---
 
 <!doctype html>
@@ -49,23 +54,38 @@ const isAdminShell = pathname.startsWith("/admin") && !!session;
           <span>芒果許</span>
         </a>
         {isAdminShell ? (
-          <nav class="flex flex-wrap items-center gap-0.5 sm:gap-1 text-sm justify-end">
-            <a href="/admin/orders" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">訂單</a>
-            <a href="/admin/seasons" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">年度</a>
-            <a href="/admin/products" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">商品</a>
-            <a href="/admin/product-groups" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">
-              <span class="sm:hidden">庫存</span>
-              <span class="hidden sm:inline">庫存池</span>
-            </a>
-            <a href="/admin/audit" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">
-              <span class="sm:hidden">紀錄</span>
-              <span class="hidden sm:inline">變更紀錄</span>
-            </a>
-            <a href="/admin/change-password" class="inline-flex items-center min-h-[44px] px-2 sm:px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">
-              <span class="sm:hidden">密碼</span>
-              <span class="hidden sm:inline">變更密碼</span>
-            </a>
-          </nav>
+          <>
+            {/* Desktop: inline nav with active marker. Hidden on mobile. */}
+            <nav aria-label="後台導航" class="hidden sm:flex flex-wrap items-center gap-1 text-sm justify-end">
+              {adminNavItems.map((item) => (
+                <a
+                  href={item.href}
+                  aria-current={adminActiveKey === item.key ? "page" : undefined}
+                  class:list={[
+                    "inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700",
+                    adminActiveKey === item.key
+                      ? "bg-mango-100 text-mango-700 font-semibold"
+                      : "",
+                  ]}
+                >
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+            {/* Mobile: hamburger toggles a drawer. Hidden on desktop. */}
+            <button
+              type="button"
+              data-admin-drawer-toggle
+              aria-label="開啟選單"
+              aria-expanded="false"
+              aria-controls="admin-drawer"
+              class="sm:hidden inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded hover:bg-mango-100 hover:text-mango-700"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" aria-hidden="true">
+                <path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </>
         ) : (
           <nav class="flex gap-1 text-sm">
             <a href="/products" class="inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700">產品</a>
@@ -75,6 +95,74 @@ const isAdminShell = pathname.startsWith("/admin") && !!session;
         )}
       </div>
     </header>
+
+    {isAdminShell && (
+      <div
+        id="admin-drawer"
+        data-admin-drawer
+        hidden
+        class="sm:hidden fixed inset-0 z-40"
+      >
+        <div data-admin-drawer-backdrop class="absolute inset-0 bg-black/40"></div>
+        <nav
+          aria-label="後台選單"
+          class="absolute right-0 top-0 h-full w-64 max-w-[80vw] bg-white shadow-xl p-4 flex flex-col gap-1 overflow-y-auto"
+        >
+          <div class="mb-2 flex items-center justify-between">
+            <span class="font-bold text-mango-700">選單</span>
+            <button
+              type="button"
+              data-admin-drawer-close
+              aria-label="關閉選單"
+              class="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded hover:bg-mango-100"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" aria-hidden="true">
+                <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
+          {adminNavItems.map((item) => (
+            <a
+              href={item.href}
+              aria-current={adminActiveKey === item.key ? "page" : undefined}
+              class:list={[
+                "inline-flex items-center min-h-[44px] px-3 py-2 rounded hover:bg-mango-100 hover:text-mango-700",
+                adminActiveKey === item.key ? "bg-mango-100 text-mango-700 font-semibold" : "",
+              ]}
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      </div>
+
+      <script>
+        const toggle = document.querySelector<HTMLButtonElement>("[data-admin-drawer-toggle]");
+        const drawer = document.querySelector<HTMLElement>("[data-admin-drawer]");
+        const backdrop = document.querySelector<HTMLElement>("[data-admin-drawer-backdrop]");
+        const closeBtn = document.querySelector<HTMLButtonElement>("[data-admin-drawer-close]");
+
+        function openDrawer(): void {
+          if (!drawer || !toggle) return;
+          drawer.hidden = false;
+          toggle.setAttribute("aria-expanded", "true");
+          document.body.style.overflow = "hidden";
+        }
+        function closeDrawer(): void {
+          if (!drawer || !toggle) return;
+          drawer.hidden = true;
+          toggle.setAttribute("aria-expanded", "false");
+          document.body.style.overflow = "";
+        }
+
+        toggle?.addEventListener("click", openDrawer);
+        closeBtn?.addEventListener("click", closeDrawer);
+        backdrop?.addEventListener("click", closeDrawer);
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && drawer && !drawer.hidden) closeDrawer();
+        });
+      </script>
+    )}
 
     <main class="flex-1">
       <slot />
