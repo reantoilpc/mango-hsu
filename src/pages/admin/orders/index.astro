@@ -115,13 +115,17 @@ const filterLabels: Record<string, string> = {
       method="POST"
       class="rounded border border-gray-200"
     >
-      <div class="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3">
+      <div
+        id="batch-bar"
+        data-batch-bar
+        class="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3 transition-colors"
+      >
         <label class="text-sm">
           <input type="checkbox" id="select-all" class="mr-1" />
           全選
         </label>
-        <span class="ml-auto text-sm text-gray-600">
-          選 <span id="selected-count">0</span> 筆
+        <span id="selected-label" class="ml-auto text-sm font-medium text-gray-500">
+          未選取
         </span>
         <button
           type="button"
@@ -129,7 +133,7 @@ const filterLabels: Record<string, string> = {
           disabled
           class="rounded bg-orange-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
-          一鍵生揀貨單
+          生成揀貨單
         </button>
         <button
           type="button"
@@ -137,13 +141,13 @@ const filterLabels: Record<string, string> = {
           disabled
           class="rounded border border-gray-300 px-4 py-2 text-sm disabled:opacity-40"
         >
-          批次標已出貨
+          批次標為已出貨
         </button>
       </div>
 
       <ul class="divide-y divide-gray-200">
         {decorated.map(({ order, summary }) => (
-          <li class="flex flex-wrap items-center gap-3 px-4 py-3">
+          <li class="order-row flex flex-wrap items-center gap-3 px-4 py-3 transition-colors">
             <input
               type="checkbox"
               class="row-checkbox h-5 w-5"
@@ -205,11 +209,20 @@ const filterLabels: Record<string, string> = {
     const selectAll = document.getElementById("select-all") as HTMLInputElement;
     const rowCheckboxes = () =>
       Array.from(form.querySelectorAll<HTMLInputElement>(".row-checkbox"));
-    const selectedCountEl = document.getElementById("selected-count")!;
+    const selectedLabelEl = document.getElementById("selected-label")!;
+    const batchBarEl = document.getElementById("batch-bar")!;
     const gotoPickBtn = document.getElementById("goto-pick") as HTMLButtonElement;
     const bulkShipBtn = document.getElementById(
       "bulk-mark-shipped",
     ) as HTMLButtonElement;
+
+    // Highlight a row's <li> whenever its checkbox flips.
+    function paintRow(cb: HTMLInputElement): void {
+      const li = cb.closest("li");
+      if (!li) return;
+      li.classList.toggle("row-selected", cb.checked);
+      li.classList.toggle("bg-mango-50", cb.checked);
+    }
 
     function checked() {
       return rowCheckboxes().filter((c) => c.checked);
@@ -217,23 +230,44 @@ const filterLabels: Record<string, string> = {
 
     function refresh() {
       const sel = checked();
-      selectedCountEl.textContent = String(sel.length);
-      gotoPickBtn.disabled = sel.length === 0;
+      const n = sel.length;
+      // §5.8: "✓ 已選 N 筆" when any selected; muted "未選取" at zero.
+      if (n > 0) {
+        selectedLabelEl.textContent = `✓ 已選 ${n} 筆`;
+        selectedLabelEl.classList.remove("text-gray-500");
+        selectedLabelEl.classList.add("text-mango-700");
+        batchBarEl.classList.remove("bg-gray-50");
+        batchBarEl.classList.add("bg-mango-50", "ring-1", "ring-mango-300");
+      } else {
+        selectedLabelEl.textContent = "未選取";
+        selectedLabelEl.classList.add("text-gray-500");
+        selectedLabelEl.classList.remove("text-mango-700");
+        batchBarEl.classList.add("bg-gray-50");
+        batchBarEl.classList.remove("bg-mango-50", "ring-1", "ring-mango-300");
+      }
+      gotoPickBtn.disabled = n === 0;
       // Bulk-mark-shipped only on paid + un-shipped rows
       bulkShipBtn.disabled =
-        sel.length === 0 ||
+        n === 0 ||
         sel.some(
           (c) => c.dataset.paid !== "1" || c.dataset.shipped === "1",
         );
     }
 
     selectAll.addEventListener("change", () => {
-      rowCheckboxes().forEach((c) => (c.checked = selectAll.checked));
+      rowCheckboxes().forEach((c) => {
+        c.checked = selectAll.checked;
+        paintRow(c);
+      });
       refresh();
     });
 
     form.addEventListener("change", (e) => {
-      if ((e.target as HTMLElement).classList.contains("row-checkbox")) refresh();
+      const t = e.target as HTMLElement;
+      if (t.classList.contains("row-checkbox")) {
+        paintRow(t as HTMLInputElement);
+        refresh();
+      }
     });
 
     gotoPickBtn.addEventListener("click", () => {
