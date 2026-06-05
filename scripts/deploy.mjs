@@ -10,6 +10,8 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { loadEnv } from "vite";
+import { validateOrderToken } from "./order-token-guard.mjs";
 
 const STAGE = {
   name: "mango-hsu-stage",
@@ -111,25 +113,33 @@ if (placeholderHits.length > 0) {
   process.exit(1);
 }
 
-// Guard 2 (2026-06-05 incident): the Vite/Astro build cache does NOT re-inline
-// import.meta.env.PUBLIC_ORDER_TOKEN when only .env.local changed (api.ts source
-// unchanged), so a non-clean build silently re-ships the PREVIOUS env's token and
-// every customer order fails with INVALID_TOKEN. The deploy:* scripts now clean-build
-// to prevent this; this guard is the backstop. Require .env.local's active
-// PUBLIC_ORDER_TOKEN to actually appear in the client bundle.
-function activeEnvOrderToken() {
-  let text;
-  try {
-    text = readFileSync(".env.local", "utf8");
-  } catch {
-    return null; // no .env.local (CI may use real env vars) — REPLACE guard still applies
-  }
-  for (const line of text.split("\n")) {
-    const m = line.match(/^\s*PUBLIC_ORDER_TOKEN\s*=\s*(\S+)/); // active (uncommented) line only
-    if (m) return m[1];
-  }
-  return null;
+// Guard 2 (2026-06-05 incident): import.meta.env.PUBLIC_ORDER_TOKEN ?? "" bakes an
+// EMPTY string into the client bundle whenever the build has no PUBLIC_ORDER_TOKEN —
+// note this is "" , NOT the REPLACE_AT_BUILD_TIME placeholder (that placeholder lives
+// in wrangler.jsonc vars, which only feed the SERVER binding, never the client
+// import.meta.env inlining). So Guard 1 never fires for this case. Every customer
+// order then POSTs token:"" and the server rejects it with INVALID_TOKEN, silently.
+// The incident build ran where no env file was present (.env is gitignored), so the
+// token resolved to "". Resolve the token the SAME way the build did — vite's loadEnv
+// reads the full cascade (.env, .env.local, .env.[mode], .env.[mode].local) plus
+// process.env and strips quotes — so the guard can never disagree with what Astro
+// actually inlined. astro build runs in production mode, so use that here too.
+const viteEnv = loadEnv("production", process.cwd(), "PUBLIC_");
+const expectedToken = validateOrderToken(viteEnv.PUBLIC_ORDER_TOKEN);
+if (!expectedToken) {
+  console.error(
+    `\n✗ aborting deploy — no non-empty PUBLIC_ORDER_TOKEN available for the build.\n` +
+      `  The client bundle would bake an empty token (import.meta.env.PUBLIC_ORDER_TOKEN ?? "")\n` +
+      `  and EVERY customer order would fail server-side with INVALID_TOKEN.\n` +
+      `  Set PUBLIC_ORDER_TOKEN (to the ${target} env's ORDER_TOKEN secret value) in .env\n` +
+      `  or .env.local, then clean-build and retry:\n` +
+      `    rm -rf dist .astro node_modules/.vite && bun run deploy:${target}\n`,
+  );
+  process.exit(1);
 }
+// Backstop: require the resolved token to actually appear in the client bundle. This
+// catches a stale build cache that re-shipped a previous env's token (Vite skips
+// re-inlining import.meta.env when only an env file changed but the source didn't).
 function clientBundleContains(dir, needle) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
@@ -141,10 +151,9 @@ function clientBundleContains(dir, needle) {
   }
   return false;
 }
-const expectedToken = activeEnvOrderToken();
-if (expectedToken && expectedToken !== PLACEHOLDER && !clientBundleContains("dist/client", expectedToken)) {
+if (!clientBundleContains("dist/client", expectedToken)) {
   console.error(
-    `\n✗ aborting deploy — .env.local's PUBLIC_ORDER_TOKEN is NOT in the client bundle.\n` +
+    `\n✗ aborting deploy — the expected PUBLIC_ORDER_TOKEN is NOT in the client bundle.\n` +
       `  A stale build cache re-shipped the previous env's token (Vite skips re-inlining\n` +
       `  import.meta.env when only .env.local changed). Customer orders would fail with\n` +
       `  INVALID_TOKEN. Clean-build and retry:\n` +
