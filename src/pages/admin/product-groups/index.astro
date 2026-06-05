@@ -94,8 +94,8 @@ function fenToJin(fen: number): string {
     </header>
 
     <p class="mb-4 text-sm text-gray-600">
-      V5.2：每個品種共用一個重量池（fen，1 fen = 0.01 斤）。
-      下訂時系統會自動依 SKU 的包裝大小（如半斤=50、1 斤=100）從這個池扣 fen。
+      V5.2：每個品種共用一個重量池（以「斤」計，可到小數第二位）。
+      下訂時系統會自動依商品編碼的包裝大小（如半斤、1 斤）從這個池扣庫存。
       <br />
       進貨／校正請填「斤」(可用小數，例如 30 或 0.5)，正數=進貨，負數=校正/報廢。
       所有變動會記入變更紀錄。
@@ -282,7 +282,7 @@ function fenToJin(fen: number): string {
 
             {skus.length > 0 && (
               <div class="mb-3 text-xs text-gray-600">
-                包含 SKU：
+                包含商品編碼：
                 {skus.map((s, i) => (
                   <span>
                     {i > 0 && "、"}
@@ -349,7 +349,7 @@ function fenToJin(fen: number): string {
             建立年度芒果販賣的三步驟：
             <br />① 在上方「＋ 新增品種」建立品種（如金煌芒果乾）
             <br />② 在品種卡片填「斤數」進貨
-            <br />③ 進貨後到品種卡的「新增此品種的品項」建立各包裝 SKU（半斤／1 斤…）
+            <br />③ 進貨後到品種卡的「新增此品種的品項」建立各包裝商品編碼（半斤／1 斤…）
           </p>
         </div>
       )}
