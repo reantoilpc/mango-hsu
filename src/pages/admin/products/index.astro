@@ -55,6 +55,9 @@ const PACKAGE_OPTIONS: Array<{ fen: number; label: string }> = [
   { fen: 100, label: "1 斤（100）" },
   { fen: 1000, label: "10 斤（1000）" },
 ];
+
+// V6 P6 一條龍：從群組頁帶 ?group=<slug> 預選所屬群組下拉。
+const preselectGroup = Astro.url.searchParams.get("group") ?? "";
 ---
 
 <Layout title="商品管理">
@@ -230,9 +233,9 @@ const PACKAGE_OPTIONS: Array<{ fen: number; label: string }> = [
                 aria-label="所屬群組"
                 class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm"
               >
-                <option value="" disabled selected>選擇群組</option>
+                <option value="" disabled selected={preselectGroup === ""}>選擇群組</option>
                 {groupRows.map((g) => (
-                  <option value={g.slug}>{g.name}</option>
+                  <option value={g.slug} selected={g.slug === preselectGroup}>{g.name}</option>
                 ))}
               </select>
               <select

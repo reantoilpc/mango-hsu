@@ -326,14 +326,32 @@ function fenToJin(fen: number): string {
                 class="intake-error hidden sm:col-span-3 rounded bg-red-50 px-3 py-2 text-xs text-red-800"
               ></div>
             </form>
+
+            <div class="mt-3 border-t border-gray-100 pt-3">
+              <a
+                href={`/admin/products?group=${g.slug}`}
+                class="inline-flex items-center gap-1 text-xs text-mango-700 underline hover:text-mango-800"
+              >
+                ＋ 新增此品種的品項（半斤／1 斤…）
+              </a>
+              {(skusByGroup.get(g.id) ?? []).length === 0 && (
+                <span class="ml-2 text-[11px] text-gray-400">此品種尚無品項</span>
+              )}
+            </div>
           </article>
         );
       })}
 
       {groupRows.length === 0 && activeSeason && (
-        <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-          當季尚無品種。請先到「商品管理」建立 SKU（會自動建立 group）。
-        </p>
+        <div class="rounded border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
+          <p class="mb-2 font-medium">當季還沒有任何品種</p>
+          <p class="mb-4 text-gray-500">
+            建立年度芒果販賣的三步驟：
+            <br />① 在上方「＋ 新增品種」建立品種（如金煌芒果乾）
+            <br />② 在品種卡片填「斤數」進貨
+            <br />③ 進貨後到品種卡的「新增此品種的品項」建立各包裝 SKU（半斤／1 斤…）
+          </p>
+        </div>
       )}
     </section>
 
