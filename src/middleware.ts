@@ -2,23 +2,13 @@ import { defineMiddleware } from "astro:middleware";
 import { makeDb } from "./db/client";
 import { env } from "./lib/env";
 import { verifySession, SESSION_COOKIE } from "./lib/auth";
+import { CSP } from "./lib/csp";
 
-// cso 2026-05-03 finding #4: defense-in-depth headers. CSP only on HTML
-// responses; the rest apply broadly. 'unsafe-inline' on script-src is needed
-// for the LIFF bind page (`<script define:vars is:inline>` for the LIFF SDK
-// bridge) and Astro's hydration bootstrap. All inline content is
-// server-controlled. Migrate to nonce or hash-based CSP if user-generated
-// HTML is ever introduced.
-const CSP =
-  "default-src 'self'; " +
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-  "font-src 'self' https://fonts.gstatic.com; " +
-  "img-src 'self' data: blob:; " +
-  "script-src 'self' 'unsafe-inline' https://static.line-scdn.net; " +
-  "connect-src 'self'; " +
-  "frame-ancestors 'none'; " +
-  "base-uri 'self'; " +
-  "form-action 'self';";
+// cso 2026-05-03 finding #4: defense-in-depth headers. CSP (HTML responses only)
+// lives in ./lib/csp so it can be unit-tested without the astro:middleware import.
+// 'unsafe-inline' on script-src is needed for the LIFF bind page's
+// `<script define:vars is:inline>` SDK bridge and Astro's hydration bootstrap;
+// all inline content is server-controlled.
 
 function applySecurityHeaders(response: Response): Response {
   // Headers may be immutable on redirect-helper results, so reassemble.
