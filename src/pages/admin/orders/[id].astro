@@ -4,7 +4,7 @@ import StatusStepper from "../../../components/admin/StatusStepper.astro";
 import StickyBar from "../../../components/admin/StickyBar.astro";
 import Modal from "../../../components/admin/Modal.astro";
 import { makeDb } from "../../../db/client";
-import { orders, order_items, products, product_groups, audit_log } from "../../../db/schema";
+import { orders, order_items, products, product_groups, audit_log, seasons } from "../../../db/schema";
 import { eq, desc } from "drizzle-orm";
 import { itemsToReadable, formatTaipei } from "../../../lib/formatters";
 import { env } from "../../../lib/env";
@@ -73,12 +73,23 @@ const sellableForNew = productRows
     variant: p.variant,
     price: p.price,
     stock: p.stock,
+    package_fen: p.package_fen,
   }));
 
 const cancelledMeta =
   order.cancelled_at !== null
     ? `${formatTaipei(order.cancelled_at)} · 庫存已歸還`
     : undefined;
+
+// V6 §5.5: this order's season shipping policy for the client-side preview.
+const seasonCfgRows = order.season_id
+  ? await db
+      .select({ shipping_config: seasons.shipping_config })
+      .from(seasons)
+      .where(eq(seasons.id, order.season_id))
+      .limit(1)
+  : [];
+const orderShipConfig = seasonCfgRows[0]?.shipping_config ?? null;
 ---
 
 <Layout>
@@ -333,6 +344,7 @@ const cancelledMeta =
       variant: string;
       price: number;
       stock: number;
+      package_fen: number;
     }
     interface ExpectedState {
       paid: boolean;
@@ -357,8 +369,12 @@ const cancelledMeta =
     const productMap = new Map(productsList.map((p) => [p.sku, p]));
 
     // expected_state + shipping config baked from SSR via JSON island.
+    type ShipConfig =
+      | { type: "flat"; fee_twd: number }
+      | { type: "threshold_jin"; free_over_fen: number; fee_twd: number };
     interface OrderStateIsland extends ExpectedState {
       shippingFeeTwd?: number;
+      shippingConfigJson?: string | null;
     }
     const stateNode = document.getElementById("v5-order-state");
     const stateIsland: OrderStateIsland = stateNode
@@ -374,6 +390,20 @@ const cancelledMeta =
       items_hash: itemsHash(initialItems),
     };
     const shippingFeeTwd = stateIsland.shippingFeeTwd ?? 150;
+    // V6 §5.5: parse this order's season shipping_config for the preview.
+    let shipCfg: ShipConfig = { type: "flat", fee_twd: shippingFeeTwd };
+    try {
+      if (stateIsland.shippingConfigJson) {
+        shipCfg = JSON.parse(stateIsland.shippingConfigJson) as ShipConfig;
+      }
+    } catch {
+      /* keep flat fallback */
+    }
+    function previewShipping(totalFen: number): number {
+      if (totalFen <= 0) return 0;
+      if (shipCfg.type === "flat") return shipCfg.fee_twd;
+      return totalFen >= shipCfg.free_over_fen ? 0 : shipCfg.fee_twd;
+    }
 
     // ============ Items working state ============
     let working: ItemWorking[] = initialItems.map((i) => ({ ...i }));
@@ -395,19 +425,20 @@ const cancelledMeta =
     function recomputeTotals(): void {
       // Skip when items are clean: SSR already rendered server-truthful totals.
       // Recomputing here would stomp the DB-correct shipping/total with a preview
-      // that mirrors the server formula but rounds differently if env values
-      // ever drift.
+      // that mirrors the server formula but rounds differently.
       if (itemsDirtyCount() === 0) return;
       let subtotal = 0;
-      let totalQty = 0;
+      let totalFen = 0;
       for (const w of working) {
         const p = productMap.get(w.sku);
-        if (p) subtotal += p.price * w.qty;
-        totalQty += w.qty;
+        if (p) {
+          subtotal += p.price * w.qty;
+          totalFen += p.package_fen * w.qty;
+        }
       }
-      // Mirrors src/lib/order-response.ts shippingFor — flat fee per order.
+      // V6 §5.5: mirrors src/lib/shipping.ts computeShipping(totalFen, config).
       // Server is authoritative; this is just a preview for the dirty state.
-      const shipping = totalQty > 0 ? shippingFeeTwd : 0;
+      const shipping = previewShipping(totalFen);
       const subEl = document.getElementById("items-subtotal");
       const shipEl = document.getElementById("items-shipping");
       const totEl = document.getElementById("items-total");
@@ -889,6 +920,7 @@ const cancelledMeta =
       shipped: order.shipped,
       cancelled_at: order.cancelled_at,
       shippingFeeTwd: parseInt(env.SHIPPING_FEE_TWD, 10) || 150,
+      shippingConfigJson: orderShipConfig,
     })}
   />
 </Layout>
