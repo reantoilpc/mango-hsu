@@ -5,14 +5,15 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
+    "clean": "rm -rf dist .astro node_modules/.vite",
     "preview": "astro preview",
     "astro": "astro",
     "db:generate": "drizzle-kit generate",
     "db:migrate:stage": "wrangler d1 migrations apply mango-hsu-stage --remote --env stage",
     "db:migrate:prod": "wrangler d1 migrations apply mango-hsu-prod --remote",
     "db:export:prod": "mkdir -p backups && wrangler d1 export mango-hsu-prod --remote --output=backups/mango-$(date +%Y%m%d).sqlite",
-    "deploy:stage": "astro build && bun run scripts/deploy.mjs stage",
-    "deploy:prod": "astro build && bun run scripts/deploy.mjs prod",
+    "deploy:stage": "bun run clean && astro build && bun run scripts/deploy.mjs stage",
+    "deploy:prod": "bun run clean && astro build && bun run scripts/deploy.mjs prod",
     "test": "bun test",
     "test:watch": "bun test --watch"
   },
