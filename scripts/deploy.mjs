@@ -111,6 +111,48 @@ if (placeholderHits.length > 0) {
   process.exit(1);
 }
 
+// Guard 2 (2026-06-05 incident): the Vite/Astro build cache does NOT re-inline
+// import.meta.env.PUBLIC_ORDER_TOKEN when only .env.local changed (api.ts source
+// unchanged), so a non-clean build silently re-ships the PREVIOUS env's token and
+// every customer order fails with INVALID_TOKEN. The deploy:* scripts now clean-build
+// to prevent this; this guard is the backstop. Require .env.local's active
+// PUBLIC_ORDER_TOKEN to actually appear in the client bundle.
+function activeEnvOrderToken() {
+  let text;
+  try {
+    text = readFileSync(".env.local", "utf8");
+  } catch {
+    return null; // no .env.local (CI may use real env vars) — REPLACE guard still applies
+  }
+  for (const line of text.split("\n")) {
+    const m = line.match(/^\s*PUBLIC_ORDER_TOKEN\s*=\s*(\S+)/); // active (uncommented) line only
+    if (m) return m[1];
+  }
+  return null;
+}
+function clientBundleContains(dir, needle) {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) {
+      if (clientBundleContains(full, needle)) return true;
+    } else if (/\.(mjs|js)$/.test(name) && readFileSync(full, "utf8").includes(needle)) {
+      return true;
+    }
+  }
+  return false;
+}
+const expectedToken = activeEnvOrderToken();
+if (expectedToken && expectedToken !== PLACEHOLDER && !clientBundleContains("dist/client", expectedToken)) {
+  console.error(
+    `\n✗ aborting deploy — .env.local's PUBLIC_ORDER_TOKEN is NOT in the client bundle.\n` +
+      `  A stale build cache re-shipped the previous env's token (Vite skips re-inlining\n` +
+      `  import.meta.env when only .env.local changed). Customer orders would fail with\n` +
+      `  INVALID_TOKEN. Clean-build and retry:\n` +
+      `    rm -rf dist .astro node_modules/.vite && bun run deploy:${target}\n`,
+  );
+  process.exit(1);
+}
+
 const result = spawnSync("bunx", ["wrangler", "deploy"], {
   stdio: "inherit",
   shell: false,
