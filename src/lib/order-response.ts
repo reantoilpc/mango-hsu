@@ -1,6 +1,7 @@
 import type { AppEnv } from "../db/client";
 import type { Order, OrderItem, Product } from "../db/schema";
 import { buildLiffBindUrl } from "./line";
+import { computeShipping, totalFenOf, type ShippingConfig } from "./shipping";
 
 export interface OrderSuccess {
   ok: true;
@@ -44,11 +45,16 @@ export type OrderResponse = OrderSuccess | OrderError;
 
 // Relative URL so the customer's status link works regardless of which env
 // (stage / prod / future custom domain) the order was placed on. Same-origin.
-export function shippingFor(items: Array<{ qty: number }>, env: AppEnv): number {
-  // Flat shipping fee per order — no free-shipping threshold (policy: 運費一律收取).
-  const totalQty = items.reduce((s, i) => s + i.qty, 0);
-  const fee = parseInt(env.SHIPPING_FEE_TWD, 10) || 150;
-  return totalQty > 0 ? fee : 0;
+// V6 (spec §5.5): shipping is computed from total order weight (Σ package_fen×qty)
+// against the active season's shipping_config (flat | threshold_jin). Callers resolve
+// items via resolveItemsForStock() FIRST (which yields package_fen per item) and parse
+// the season's shipping_config via parseShippingConfig() — this stays a pure adapter so
+// it's unit-testable and never re-queries the DB.
+export function shippingFor(
+  items: Array<{ package_fen: number; qty: number }>,
+  config: ShippingConfig,
+): number {
+  return computeShipping(totalFenOf(items), config);
 }
 
 export function expectedMemoFor(orderId: string, name: string): string {

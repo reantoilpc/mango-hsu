@@ -18,6 +18,7 @@ import {
   getGroupStockFen,
 } from "../../../../../lib/stock";
 import { shippingFor } from "../../../../../lib/order-response";
+import { parseShippingConfig } from "../../../../../lib/shipping";
 import { compareItemsHash } from "../../../../../lib/items-hash";
 import { env } from "../../../../../lib/env";
 
@@ -318,7 +319,18 @@ export const POST: APIRoute = async ({ request, params }) => {
         const unit = ex ? ex.unit_price : r.price;
         return s + unit * r.qty;
       }, 0);
-      newShipping = shippingFor(body.items!, env);
+      // V6: shipping recompute uses THIS order's season shipping_config (not "active"),
+      // matching edit semantics — an order edited after season rollover keeps its own
+      // season's policy. resolvedNew.resolved carries package_fen for the weight sum.
+      const seasonRow = order.season_id
+        ? await db
+            .select({ shipping_config: seasons.shipping_config })
+            .from(seasons)
+            .where(eq(seasons.id, order.season_id))
+            .limit(1)
+        : [];
+      const shippingConfig = parseShippingConfig(seasonRow[0]?.shipping_config ?? null);
+      newShipping = shippingFor(resolvedNew.resolved, shippingConfig);
       newTotal = newSubtotal + newShipping;
       auditedChanges.items = {
         before: currentItems.map((e) => ({ sku: e.sku, qty: e.qty, product_id: e.product_id })),
