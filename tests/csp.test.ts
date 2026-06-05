@@ -34,6 +34,11 @@ describe("CSP", () => {
     expect(d["connect-src"]).toContain("https://api.line.me");
   });
 
+  it("lets the LIFF SDK fetch its manifest (connect-src *.line-scdn.net)", () => {
+    // liff.init fetches https://liffsdk.line-scdn.net/xlt/manifest.json.
+    expect(d["connect-src"]).toContain("https://*.line-scdn.net");
+  });
+
   it("still allows same-origin connect for /api/liff/bind", () => {
     expect(d["connect-src"]).toContain("'self'");
   });
