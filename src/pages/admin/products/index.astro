@@ -2,8 +2,8 @@
 import Layout from "../../../layouts/Layout.astro";
 import StickyBar from "../../../components/admin/StickyBar.astro";
 import { makeDb } from "../../../db/client";
-import { products } from "../../../db/schema";
-import { asc } from "drizzle-orm";
+import { products, product_groups, seasons } from "../../../db/schema";
+import { asc, eq } from "drizzle-orm";
 import { env } from "../../../lib/env";
 
 const session = Astro.locals.session;
@@ -13,10 +13,48 @@ if (session.role !== "admin") {
 }
 
 const db = makeDb(env);
-const productRows = await db
+
+// V6: scope the catalog to the active season (matches create.ts, which only creates within
+// status='active'). Without an active season there is nowhere to create products.
+const activeSeasonRows = await db
   .select()
-  .from(products)
-  .orderBy(asc(products.display_order), asc(products.sku));
+  .from(seasons)
+  .where(eq(seasons.status, "active"))
+  .limit(1);
+const activeSeason = activeSeasonRows[0] ?? null;
+
+// Groups of the active season — feeds the "所屬群組" <select> and the grouped product list.
+const groupRows = activeSeason
+  ? await db
+      .select()
+      .from(product_groups)
+      .where(eq(product_groups.season_id, activeSeason.id))
+      .orderBy(asc(product_groups.display_order), asc(product_groups.slug))
+  : [];
+
+// Products of the active season only. Grouped by group_id in the template (Task 4).
+const productRows = activeSeason
+  ? await db
+      .select()
+      .from(products)
+      .where(eq(products.season_id, activeSeason.id))
+      .orderBy(asc(products.group_id), asc(products.display_order), asc(products.sku))
+  : [];
+
+// group_id -> products[] for the grouped render.
+const productsByGroup = new Map<number, typeof productRows>();
+for (const p of productRows) {
+  const list = productsByGroup.get(p.group_id) ?? [];
+  list.push(p);
+  productsByGroup.set(p.group_id, list);
+}
+
+// Package-size options shared by the create form (fen units: 半斤=50, 1斤=100, 10斤=1000).
+const PACKAGE_OPTIONS: Array<{ fen: number; label: string }> = [
+  { fen: 50, label: "半斤（50）" },
+  { fen: 100, label: "1 斤（100）" },
+  { fen: 1000, label: "10 斤（1000）" },
+];
 ---
 
 <Layout title="商品管理">
@@ -38,125 +76,195 @@ const productRows = await db
       <a href="/admin/product-groups" class="text-mango-700 underline">庫存池（進貨）</a>頁面調整。
     </p>
 
-    <ul
-      class="mb-8 divide-y divide-gray-200 rounded border border-gray-200"
-      data-dirty-track="products"
-    >
-      <li class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem] items-center gap-2 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
-        <div>SKU</div>
-        <div>名稱</div>
-        <div>規格</div>
-        <div>價格</div>
-        <div>順序</div>
-        <div class="text-center">上架</div>
-      </li>
-      {productRows.map((p) => (
-        <li class="px-4 py-3 space-y-2" data-prod-row data-sku={p.sku}>
-          <div class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem]">
-            <div class="font-mono text-sm text-gray-700">{p.sku}</div>
-            <input
-              type="text"
-              data-dirty-key={`${p.sku}__name`}
-              data-prod-field="name"
-              value={p.name}
-              required
-              maxlength="50"
-              aria-label={`${p.sku} 名稱`}
-              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
-              placeholder="名稱"
-            />
-            <input
-              type="text"
-              data-dirty-key={`${p.sku}__variant`}
-              data-prod-field="variant"
-              value={p.variant}
-              required
-              maxlength="30"
-              aria-label={`${p.sku} 規格`}
-              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
-              placeholder="規格"
-            />
-            <input
-              type="number"
-              data-dirty-key={`${p.sku}__price`}
-              data-prod-field="price"
-              value={p.price}
-              required
-              min="0"
-              max="100000"
-              aria-label={`${p.sku} 價格`}
-              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
-              placeholder="價格"
-            />
-            <input
-              type="number"
-              data-dirty-key={`${p.sku}__display_order`}
-              data-prod-field="display_order"
-              value={p.display_order}
-              required
-              min="0"
-              aria-label={`${p.sku} 順序`}
-              class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
-              placeholder="順序"
-            />
-            <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
-              <input
-                type="checkbox"
-                data-dirty-key={`${p.sku}__available`}
-                data-prod-field="available"
-                checked={p.available}
-                aria-label={`${p.sku} 上架`}
-              />
-              <span>上架</span>
-            </label>
-          </div>
+    <div class="mb-8 space-y-6" data-dirty-track="products">
+      {groupRows.map((g) => {
+        const groupProducts = productsByGroup.get(g.id) ?? [];
+        return (
+          <section
+            class="rounded border border-gray-200"
+            data-group-section
+            data-group-slug={g.slug}
+          >
+            <header class="flex items-baseline justify-between gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2">
+              <h2 class="text-sm font-bold text-gray-800">{g.name}</h2>
+              <span class="font-mono text-xs text-gray-500">{g.slug}</span>
+            </header>
 
-        </li>
-      ))}
-      {productRows.length === 0 && (
-        <li class="px-4 py-6 text-center text-sm text-gray-500">（尚無商品）</li>
+            <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem] items-center gap-2 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
+              <div>SKU</div>
+              <div>名稱</div>
+              <div>規格</div>
+              <div>價格</div>
+              <div>順序</div>
+              <div class="text-center">上架</div>
+            </div>
+
+            <ul class="divide-y divide-gray-200">
+              {groupProducts.map((p) => (
+                <li class="px-4 py-3 space-y-2" data-prod-row data-sku={p.sku}>
+                  <div class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem]">
+                    <div class="font-mono text-sm text-gray-700">{p.sku}</div>
+                    <input
+                      type="text"
+                      data-dirty-key={`${p.sku}__name`}
+                      data-prod-field="name"
+                      value={p.name}
+                      required
+                      maxlength="50"
+                      aria-label={`${p.sku} 名稱`}
+                      class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+                      placeholder="名稱"
+                    />
+                    <input
+                      type="text"
+                      data-dirty-key={`${p.sku}__variant`}
+                      data-prod-field="variant"
+                      value={p.variant}
+                      required
+                      maxlength="30"
+                      aria-label={`${p.sku} 規格`}
+                      class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+                      placeholder="規格"
+                    />
+                    <input
+                      type="number"
+                      data-dirty-key={`${p.sku}__price`}
+                      data-prod-field="price"
+                      value={p.price}
+                      required
+                      min="0"
+                      max="100000"
+                      aria-label={`${p.sku} 價格`}
+                      class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+                      placeholder="價格"
+                    />
+                    <input
+                      type="number"
+                      data-dirty-key={`${p.sku}__display_order`}
+                      data-prod-field="display_order"
+                      value={p.display_order}
+                      required
+                      min="0"
+                      aria-label={`${p.sku} 順序`}
+                      class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+                      placeholder="順序"
+                    />
+                    <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
+                      <input
+                        type="checkbox"
+                        data-dirty-key={`${p.sku}__available`}
+                        data-prod-field="available"
+                        checked={p.available}
+                        aria-label={`${p.sku} 上架`}
+                      />
+                      <span>上架</span>
+                    </label>
+                  </div>
+                </li>
+              ))}
+              {groupProducts.length === 0 && (
+                <li class="px-4 py-6 text-center text-sm text-gray-500">
+                  此群組尚無商品。用下方「新增商品」並選此群組來建立。
+                </li>
+              )}
+            </ul>
+          </section>
+        );
+      })}
+
+      {activeSeason && groupRows.length === 0 && (
+        <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+          當季尚無品種群組，因此沒有商品。請先到
+          <a href="/admin/product-groups" class="text-mango-700 underline">庫存池（進貨）</a>
+          建立群組。
+        </p>
       )}
-    </ul>
+      {!activeSeason && (
+        <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+          找不到當季（status='active'）。請先到「年度設定」啟用一個季節。
+        </p>
+      )}
+    </div>
 
     <section class="rounded border border-amber-200 bg-amber-50 p-4">
       <h2 class="mb-3 text-lg font-bold">新增商品</h2>
-      <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem] items-center gap-2 mb-1 px-1 text-xs font-medium text-amber-800">
-        <div>SKU</div>
-        <div>名稱</div>
-        <div>規格</div>
-        <div>價格</div>
-        <div>順序</div>
-        <div class="text-center">上架</div>
-      </div>
-      <form id="create-form" class="space-y-3">
-        <div class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_4rem_5rem_4rem_4rem]">
-          <input
-            type="text"
-            name="sku"
-            required
-            pattern="[A-Z0-9_-]+"
-            aria-label="SKU"
-            class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono"
-            placeholder="SKU"
-          />
-          <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="名稱" />
-          <input type="text" name="variant" required aria-label="規格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="規格" />
-          <input type="number" name="price" required min="0" aria-label="價格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="價格" />
-          <input type="number" name="display_order" required value="0" aria-label="順序" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="順序" />
-          <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
-            <input type="checkbox" name="available" checked />
-            <span>上架</span>
-          </label>
-        </div>
-        <div class="flex justify-end">
-          <button
-            type="submit"
-            class="w-full sm:w-auto inline-flex items-center justify-center rounded bg-amber-600 px-6 py-2 min-h-[44px] text-sm font-medium text-white hover:bg-amber-700"
-          >
-            新增商品
-          </button>
-        </div>
-      </form>
+      {!activeSeason && (
+        <p class="rounded bg-red-50 px-3 py-2 text-sm text-red-800">
+          找不到當季（status='active'）。請先到「年度設定」啟用一個季節，才能新增商品。
+        </p>
+      )}
+      {activeSeason && groupRows.length === 0 && (
+        <p class="rounded bg-amber-100 px-3 py-2 text-sm text-amber-900">
+          當季尚無品種群組。請先到
+          <a href="/admin/product-groups" class="underline">庫存池（進貨）</a>
+          建立群組，才能在這裡新增商品。
+        </p>
+      )}
+      {activeSeason && groupRows.length > 0 && (
+        <>
+          <div class="hidden sm:grid sm:grid-cols-[7rem_1fr_7rem_6rem_4rem_5rem_4rem_4rem] items-center gap-2 mb-1 px-1 text-xs font-medium text-amber-800">
+            <div>SKU</div>
+            <div>名稱</div>
+            <div>所屬群組</div>
+            <div>包裝</div>
+            <div>規格</div>
+            <div>價格</div>
+            <div>順序</div>
+            <div class="text-center">上架</div>
+          </div>
+          <form id="create-form" class="space-y-3">
+            <div class="grid grid-cols-2 items-center gap-2 sm:grid-cols-[7rem_1fr_7rem_6rem_4rem_5rem_4rem_4rem]">
+              <input
+                type="text"
+                name="sku"
+                required
+                pattern="[A-Z0-9_-]+"
+                aria-label="SKU"
+                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono"
+                placeholder="SKU"
+              />
+              <input type="text" name="name" required aria-label="名稱" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="名稱" />
+              <select
+                name="group_slug"
+                required
+                aria-label="所屬群組"
+                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm"
+              >
+                <option value="" disabled selected>選擇群組</option>
+                {groupRows.map((g) => (
+                  <option value={g.slug}>{g.name}</option>
+                ))}
+              </select>
+              <select
+                name="package_fen"
+                required
+                aria-label="包裝大小"
+                class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm"
+              >
+                <option value="" disabled selected>選擇包裝</option>
+                {PACKAGE_OPTIONS.map((o) => (
+                  <option value={o.fen}>{o.label}</option>
+                ))}
+              </select>
+              <input type="text" name="variant" required aria-label="規格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="規格" />
+              <input type="number" name="price" required min="0" aria-label="價格" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="價格" />
+              <input type="number" name="display_order" required value="0" aria-label="順序" class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm" placeholder="順序" />
+              <label class="flex items-center justify-center gap-1 min-h-[44px] text-sm">
+                <input type="checkbox" name="available" checked />
+                <span>上架</span>
+              </label>
+            </div>
+            <div class="flex justify-end">
+              <button
+                type="submit"
+                class="w-full sm:w-auto inline-flex items-center justify-center rounded bg-amber-600 px-6 py-2 min-h-[44px] text-sm font-medium text-white hover:bg-amber-700"
+              >
+                新增商品
+              </button>
+            </div>
+          </form>
+        </>
+      )}
     </section>
   </main>
 
@@ -332,6 +440,8 @@ const productRows = await db
       price: number;
       available: boolean;
       display_order: number;
+      group_slug: string;
+      package_fen: number;
     } {
       const fd = new FormData(form);
       return {
@@ -340,6 +450,8 @@ const productRows = await db
         price: Number(fd.get("price") ?? 0),
         available: fd.get("available") === "on",
         display_order: Number(fd.get("display_order") ?? 0),
+        group_slug: String(fd.get("group_slug") ?? "").trim(),
+        package_fen: Number(fd.get("package_fen") ?? 0),
       };
     }
 
@@ -353,6 +465,14 @@ const productRows = await db
       };
       if (!/^[A-Z0-9_-]+$/.test(data.sku)) {
         showToast("SKU 只能大寫英數、底線、連字號", { kind: "error" });
+        return;
+      }
+      if (!/^[a-z0-9-]+$/.test(data.group_slug)) {
+        showToast("請選擇所屬群組", { kind: "error" });
+        return;
+      }
+      if (!Number.isInteger(data.package_fen) || data.package_fen <= 0) {
+        showToast("請選擇包裝大小", { kind: "error" });
         return;
       }
       const res = await fetch("/api/admin/products/create", {
