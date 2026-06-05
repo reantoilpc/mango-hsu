@@ -1,5 +1,6 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
+import Modal from "../../../components/admin/Modal.astro";
 import { makeDb } from "../../../db/client";
 import { orders, order_items, products } from "../../../db/schema";
 import { eq, and, desc, gte, lte, inArray, isNotNull } from "drizzle-orm";
@@ -204,7 +205,17 @@ const filterLabels: Record<string, string> = {
     </form>
   </main>
 
+  <Modal
+    id="bulk-ship-modal"
+    title="批次標為已出貨"
+    confirmLabel="確認標記"
+  >
+    <p class="mb-2">以下 <span id="bulk-ship-count" class="font-semibold">0</span> 筆訂單將標為已出貨：</p>
+    <ul id="bulk-ship-list" class="max-h-48 overflow-y-auto rounded border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-6"></ul>
+  </Modal>
+
   <script>
+    import { flashToast, consumeFlash } from "../../../lib/toast";
     const form = document.getElementById("batch-form") as HTMLFormElement;
     const selectAll = document.getElementById("select-all") as HTMLInputElement;
     const rowCheckboxes = () =>
@@ -278,17 +289,52 @@ const filterLabels: Record<string, string> = {
       window.location.href = `/admin/batches/new?ids=${encodeURIComponent(ids)}`;
     });
 
-    bulkShipBtn.addEventListener("click", async () => {
-      const ids = checked().map((c) => c.value);
-      if (!ids.length) return;
-      if (!confirm(`確定把 ${ids.length} 筆訂單標為已出貨？`)) return;
+    const bulkShipDlg = document.getElementById("bulk-ship-modal") as HTMLDialogElement | null;
+    const bulkShipCountEl = document.getElementById("bulk-ship-count");
+    const bulkShipListEl = document.getElementById("bulk-ship-list");
+
+    async function performBulkShip(ids: string[]): Promise<void> {
       const res = await fetch("/api/admin/orders/bulk-mark-shipped", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ ids }),
       });
-      if (res.ok) location.reload();
-      else alert("失敗：" + (await res.text()));
+      if (res.ok) {
+        // §5.8: concrete success message survives the reload via flashToast.
+        flashToast(`已標 ${ids.length} 筆為已出貨`, { kind: "success" });
+        location.reload();
+      } else {
+        flashToast(`批次標出貨失敗：${await res.text()}`, { kind: "error" });
+        location.reload();
+      }
+    }
+
+    bulkShipBtn.addEventListener("click", () => {
+      const ids = checked().map((c) => c.value);
+      if (!ids.length) return;
+      // §5.8: confirm dialog lists every order id so the shopkeeper can verify.
+      if (bulkShipCountEl) bulkShipCountEl.textContent = String(ids.length);
+      if (bulkShipListEl) {
+        bulkShipListEl.innerHTML = "";
+        for (const id of ids) {
+          const li = document.createElement("li");
+          li.textContent = id;
+          bulkShipListEl.appendChild(li);
+        }
+      }
+      bulkShipDlg?.showModal();
     });
+
+    bulkShipDlg
+      ?.querySelector("[data-modal-confirm]")
+      ?.addEventListener("click", () => {
+        const ids = checked().map((c) => c.value);
+        bulkShipDlg.close();
+        if (ids.length) performBulkShip(ids);
+      });
+
+    // Show any toast queued by a previous reload (bulk-ship result).
+    consumeFlash();
   </script>
 </Layout>
