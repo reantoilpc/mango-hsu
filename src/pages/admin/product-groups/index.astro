@@ -111,6 +111,72 @@ function fenToJin(fen: number): string {
       </p>
     )}
 
+    {activeSeason && (
+      <section class="mb-6 rounded border border-emerald-200 bg-emerald-50 p-4">
+        <details data-new-group-details>
+          <summary class="cursor-pointer text-sm font-medium text-emerald-800 select-none">
+            ＋ 新增品種（群組）
+          </summary>
+          <form id="new-group-form" class="mt-3 space-y-3">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_5rem]">
+              <label class="block">
+                <span class="mb-1 block text-xs text-emerald-800">品種名稱（顯示用）</span>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  maxlength="50"
+                  aria-label="新群組品種名稱"
+                  class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                  placeholder="例：愛文芒果乾"
+                />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs text-emerald-800">品種代碼（英數小寫、連字號）</span>
+                <input
+                  type="text"
+                  name="slug"
+                  required
+                  pattern="[a-z0-9-]+"
+                  maxlength="40"
+                  aria-label="新群組品種代碼"
+                  class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono focus-visible:outline-2 focus-visible:outline-mango-500"
+                  placeholder="例：irwin-dried"
+                />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs text-emerald-800">排序</span>
+                <input
+                  type="number"
+                  name="display_order"
+                  value="0"
+                  min="0"
+                  aria-label="新群組排序"
+                  class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                />
+              </label>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <label class="flex items-center gap-1 text-sm text-emerald-800">
+                <input type="checkbox" name="available" checked />
+                <span>立即上架</span>
+              </label>
+              <button
+                type="submit"
+                class="inline-flex items-center justify-center rounded bg-emerald-600 px-6 py-2 min-h-[44px] text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-not-allowed"
+              >
+                建立品種
+              </button>
+            </div>
+            <div
+              data-new-group-error
+              class="hidden rounded bg-red-50 px-3 py-2 text-xs text-red-800"
+            ></div>
+          </form>
+        </details>
+      </section>
+    )}
+
     <section class="space-y-4">
       {groupRows.map((g) => {
         const skus = skusByGroup.get(g.id) ?? [];
@@ -352,6 +418,102 @@ function fenToJin(fen: number): string {
         }
       });
     });
+
+    // ============ Create new product_group (V6 P6 §5.2) ============
+    interface GroupCreateOk {
+      ok: true;
+      group_id: number;
+      slug: string;
+    }
+    interface GroupCreateFail {
+      ok: false;
+      error_code: string;
+      message?: string;
+      slug?: string;
+    }
+
+    const newGroupForm = document.getElementById("new-group-form") as HTMLFormElement | null;
+    if (newGroupForm) {
+      const ngErr = newGroupForm.querySelector<HTMLElement>("[data-new-group-error]")!;
+      const ngBtn = newGroupForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+
+      function ngShowErr(msg: string): void {
+        ngErr.textContent = msg;
+        ngErr.classList.remove("hidden");
+      }
+      function ngClearErr(): void {
+        ngErr.textContent = "";
+        ngErr.classList.add("hidden");
+      }
+
+      newGroupForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        ngClearErr();
+
+        const fd = new FormData(newGroupForm);
+        const name = String(fd.get("name") ?? "").trim();
+        const slug = String(fd.get("slug") ?? "").trim();
+        const displayOrder = Number(fd.get("display_order") ?? 0);
+        const available = fd.get("available") === "on";
+
+        if (!name) {
+          ngShowErr("請填品種名稱");
+          return;
+        }
+        if (!/^[a-z0-9-]+$/.test(slug)) {
+          ngShowErr("品種代碼只能小寫英數與連字號（例：irwin-dried）");
+          return;
+        }
+
+        ngBtn.disabled = true;
+        const original = ngBtn.textContent;
+        ngBtn.textContent = "建立中...";
+
+        try {
+          const res = await fetch("/api/admin/product-groups/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              name,
+              slug,
+              display_order: Number.isFinite(displayOrder) ? displayOrder : 0,
+              available,
+            }),
+          });
+
+          const ct = res.headers.get("content-type") ?? "";
+          if (!ct.includes("application/json")) {
+            ngShowErr(`伺服器回應異常 (${res.status})：${await res.text()}`);
+            ngBtn.disabled = false;
+            ngBtn.textContent = original;
+            return;
+          }
+
+          const data = (await res.json()) as GroupCreateOk | GroupCreateFail;
+          if (res.ok && "ok" in data && data.ok) {
+            flashToast(`已新增品種：${name}`, { kind: "success" });
+            location.reload();
+            return;
+          }
+
+          const fail = data as GroupCreateFail;
+          if (fail.error_code === "SLUG_TAKEN") {
+            ngShowErr(`品種代碼「${fail.slug ?? slug}」當季已存在，請換一個。`);
+          } else if (fail.error_code === "NO_ACTIVE_SEASON") {
+            ngShowErr("目前沒有啟用中的年度季節，請先到「年度設定」啟用當季。");
+          } else {
+            ngShowErr(`新增失敗 (${fail.error_code})：${fail.message ?? "?"}`);
+          }
+          ngBtn.disabled = false;
+          ngBtn.textContent = original;
+        } catch {
+          ngShowErr("網路錯誤，請稍後再試。");
+          ngBtn.disabled = false;
+          ngBtn.textContent = original;
+        }
+      });
+    }
 
     consumeFlash();
   </script>
