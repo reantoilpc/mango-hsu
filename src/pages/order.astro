@@ -10,6 +10,7 @@ const sellable = settings.products.filter(
   (p) => p.available && p.derived_available_count > 0,
 );
 const shipFee = settings.shipping_fee_twd;
+const shipConfig = settings.shipping_config;
 ---
 
 <Layout title="下訂 · 芒果許">
@@ -115,6 +116,7 @@ const shipFee = settings.shipping_fee_twd;
                       name={`qty_${p.sku}`}
                       data-sku={p.sku}
                       data-price={p.price}
+                      data-package-fen={p.package_fen}
                       min="0"
                       max={Math.min(99, p.derived_available_count)}
                       value="0"
@@ -297,6 +299,13 @@ const shipFee = settings.shipping_fee_twd;
       )
     }
   </section>
+
+  <script
+    is:inline
+    type="application/json"
+    id="ship-config"
+    set:html={JSON.stringify(shipConfig)}
+  />
 </Layout>
 
 <script>
@@ -307,6 +316,22 @@ const shipFee = settings.shipping_fee_twd;
   const form = document.getElementById("order-form") as HTMLFormElement | null;
   if (form) {
     const shipFee = Number(form.dataset.shipFee ?? 150);
+    // V6 §5.5: shipping_config baked by SSR island so the live preview matches the server.
+    type ShipConfig =
+      | { type: "flat"; fee_twd: number }
+      | { type: "threshold_jin"; free_over_fen: number; fee_twd: number };
+    const shipCfgNode = document.getElementById("ship-config");
+    let shipCfg: ShipConfig = { type: "flat", fee_twd: shipFee };
+    try {
+      if (shipCfgNode?.textContent) shipCfg = JSON.parse(shipCfgNode.textContent) as ShipConfig;
+    } catch {
+      /* keep flat fallback */
+    }
+    function previewShipping(totalFen: number): number {
+      if (totalFen <= 0) return 0;
+      if (shipCfg.type === "flat") return shipCfg.fee_twd;
+      return totalFen >= shipCfg.free_over_fen ? 0 : shipCfg.fee_twd;
+    }
 
     const qtyInputs = form.querySelectorAll<HTMLInputElement>(".item-qty");
     const subtotalEl = document.getElementById("subtotal") as HTMLElement;
@@ -316,26 +341,34 @@ const shipFee = settings.shipping_fee_twd;
     const submitBtn = document.getElementById("submit-btn") as HTMLButtonElement;
     const pdpa = document.getElementById("pdpa") as HTMLInputElement;
 
-    function computeItems(): { items: OrderItem[]; totalQty: number; subtotal: number } {
+    function computeItems(): {
+      items: OrderItem[];
+      totalQty: number;
+      subtotal: number;
+      totalFen: number;
+    } {
       const items: OrderItem[] = [];
       let totalQty = 0;
       let subtotal = 0;
+      let totalFen = 0;
       qtyInputs.forEach((el) => {
         const qty = Math.max(0, Math.floor(Number(el.value) || 0));
         if (qty > 0) {
           const sku = el.dataset.sku as OrderItem["sku"];
           const price = Number(el.dataset.price ?? 0);
+          const packageFen = Number(el.dataset.packageFen ?? 0);
           items.push({ sku, qty });
           totalQty += qty;
           subtotal += price * qty;
+          totalFen += packageFen * qty;
         }
       });
-      return { items, totalQty, subtotal };
+      return { items, totalQty, subtotal, totalFen };
     }
 
     function recomputeSummary() {
-      const { totalQty, subtotal } = computeItems();
-      const shipping = totalQty > 0 ? shipFee : 0;
+      const { subtotal, totalFen } = computeItems();
+      const shipping = previewShipping(totalFen);
       const total = subtotal + shipping;
       subtotalEl.textContent = `$${subtotal}`;
       shippingEl.textContent = `$${shipping}`;
