@@ -10,6 +10,8 @@ import {
   STAGE_URL,
   createTestAdminSession,
   cleanupTestAdmin,
+  cleanupTestData,
+  seedActiveSeasonScenario,
   d1Execute,
   skipIfNoIntegration,
 } from "./_setup";
@@ -31,8 +33,18 @@ async function getHtml(path: string, cookie: string): Promise<{ status: number; 
 
 beforeAll(() => {
   if (SKIP) return;
+  cleanupTestData();
   cleanupTestAdmin();
   adminCookie = createTestAdminSession(); // admin role by default
+  // Seed an active season + group + SKU so the home dashboard renders the
+  // stock-summary region; without an active season the page shows the
+  // "尚未設定當季年度" empty-state instead (which is correct behaviour).
+  seedActiveSeasonScenario({
+    season_code: "test-p8-ux",
+    group_slug: "test-p8grp",
+    initial_stock_fen: 1000,
+    skus: [{ sku: "TEST-P8-1KG", package_fen: 100, price: 300 }],
+  });
   // Build an operator session: createTestAdminSession upserts an admin; downgrade a
   // second user to operator manually.
   const token = `test-${crypto.randomUUID()}`;
@@ -49,6 +61,7 @@ beforeAll(() => {
 
 afterAll(() => {
   if (SKIP) return;
+  cleanupTestData();
   cleanupTestAdmin();
 });
 
