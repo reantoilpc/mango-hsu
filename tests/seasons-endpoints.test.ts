@@ -234,3 +234,114 @@ describe("PATCH /api/admin/seasons/:id/activate", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// --- PATCH /api/admin/seasons/:id/archive ---------------------------------
+
+// Insert a minimal order tied to a season. Uses test- prefixes so cleanupTestData
+// removes it. Far-future order_id avoids any collision with real M-YYYYMMDD-NNN.
+function seedOrder(opts: {
+  order_id: string;
+  season_id: number;
+  shipped: 0 | 1;
+  cancelled: boolean;
+}): void {
+  const now = new Date().toISOString();
+  const cancelledAt = opts.cancelled ? `'${now}'` : "NULL";
+  d1Execute(
+    `INSERT INTO orders
+       (order_id, season_id, created_at, name, phone, address, subtotal, shipping, total,
+        expected_memo, pdpa_accepted, paid, shipped, idempotency_key, cancelled_at)
+     VALUES
+       ('${opts.order_id}', ${opts.season_id}, '${now}', 'test-buyer', '0900000000',
+        'test addr', 100, 0, 100, '0000', 1, 0, ${opts.shipped},
+        'test-${opts.order_id}', ${cancelledAt})`,
+  );
+}
+
+describe("PATCH /api/admin/seasons/:id/archive", () => {
+  it("blocks archive when season has unshipped active orders (409)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const { season_id } = seedActiveSeasonScenario({
+      season_code: SEASON_ARCH,
+      group_slug: "test-se-grp",
+      initial_stock_fen: 0,
+      skus: [],
+    });
+    seedOrder({
+      order_id: "M-29991231-001",
+      season_id,
+      shipped: 0,
+      cancelled: false,
+    });
+
+    const res = await patchSeason(cookie, season_id, "archive");
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      error_code: string;
+      unshipped_count: number;
+    };
+    expect(body.error_code).toBe("UNSHIPPED_ORDERS");
+    expect(body.unshipped_count).toBeGreaterThanOrEqual(1);
+
+    // Season is NOT archived.
+    expect(seasonRow(SEASON_ARCH)?.status).toBe("active");
+  });
+
+  it("archives when all orders shipped or cancelled (200)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const { season_id } = seedActiveSeasonScenario({
+      season_code: SEASON_ARCH,
+      group_slug: "test-se-grp",
+      initial_stock_fen: 0,
+      skus: [],
+    });
+    // One shipped, one cancelled — neither blocks archive.
+    seedOrder({ order_id: "M-29991231-002", season_id, shipped: 1, cancelled: false });
+    seedOrder({ order_id: "M-29991231-003", season_id, shipped: 0, cancelled: true });
+
+    const res = await patchSeason(cookie, season_id, "archive");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+    expect(seasonRow(SEASON_ARCH)?.status).toBe("archived");
+
+    const audit = d1Execute(
+      `SELECT count(*) AS n FROM audit_log
+        WHERE action = 'season_archive' AND season_id = ${season_id}`,
+    ) as Array<{ n: number }>;
+    expect(audit[0]!.n).toBe(1);
+  });
+
+  it("force=true archives despite unshipped orders (200)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const { season_id } = seedActiveSeasonScenario({
+      season_code: SEASON_ARCH,
+      group_slug: "test-se-grp",
+      initial_stock_fen: 0,
+      skus: [],
+    });
+    seedOrder({ order_id: "M-29991231-004", season_id, shipped: 0, cancelled: false });
+
+    const res = await patchSeason(cookie, season_id, "archive", { force: true });
+    expect(res.status).toBe(200);
+    expect(seasonRow(SEASON_ARCH)?.status).toBe("archived");
+  });
+
+  it("404 for unknown season id", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const res = await patchSeason(cookie, 999999999, "archive");
+    expect(res.status).toBe(404);
+  });
+
+  it("CSRF: missing Origin rejected (403)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const id = seedSeason({ code: SEASON_ARCH, status: "draft" });
+    const res = await patchSeason(cookie, id, "archive", {}, { origin: false });
+    expect(res.status).toBe(403);
+  });
+});
