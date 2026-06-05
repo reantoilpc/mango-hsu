@@ -45,10 +45,10 @@ export type OrderResponse = OrderSuccess | OrderError;
 // Relative URL so the customer's status link works regardless of which env
 // (stage / prod / future custom domain) the order was placed on. Same-origin.
 export function shippingFor(items: Array<{ qty: number }>, env: AppEnv): number {
+  // Flat shipping fee per order — no free-shipping threshold (policy: 運費一律收取).
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
-  const minFree = parseInt(env.FREE_SHIPPING_MIN_PACKAGES, 10) || 10;
-  const fee = parseInt(env.SHIPPING_FEE_TWD, 10) || 80;
-  return totalQty >= minFree ? 0 : fee;
+  const fee = parseInt(env.SHIPPING_FEE_TWD, 10) || 150;
+  return totalQty > 0 ? fee : 0;
 }
 
 export function expectedMemoFor(orderId: string, name: string): string {

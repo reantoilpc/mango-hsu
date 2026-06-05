@@ -358,7 +358,6 @@ const cancelledMeta =
 
     // expected_state + shipping config baked from SSR via JSON island.
     interface OrderStateIsland extends ExpectedState {
-      freeShippingMinPackages?: number;
       shippingFeeTwd?: number;
     }
     const stateNode = document.getElementById("v5-order-state");
@@ -374,8 +373,7 @@ const cancelledMeta =
       // submit (the "double-decrement" race).
       items_hash: itemsHash(initialItems),
     };
-    const freeShippingMinPackages = stateIsland.freeShippingMinPackages ?? 10;
-    const shippingFeeTwd = stateIsland.shippingFeeTwd ?? 80;
+    const shippingFeeTwd = stateIsland.shippingFeeTwd ?? 150;
 
     // ============ Items working state ============
     let working: ItemWorking[] = initialItems.map((i) => ({ ...i }));
@@ -407,9 +405,9 @@ const cancelledMeta =
         if (p) subtotal += p.price * w.qty;
         totalQty += w.qty;
       }
-      // Mirrors src/lib/order-response.ts shippingFor — qty-based, NOT subtotal.
+      // Mirrors src/lib/order-response.ts shippingFor — flat fee per order.
       // Server is authoritative; this is just a preview for the dirty state.
-      const shipping = totalQty >= freeShippingMinPackages ? 0 : shippingFeeTwd;
+      const shipping = totalQty > 0 ? shippingFeeTwd : 0;
       const subEl = document.getElementById("items-subtotal");
       const shipEl = document.getElementById("items-shipping");
       const totEl = document.getElementById("items-total");
@@ -890,8 +888,7 @@ const cancelledMeta =
       paid: order.paid,
       shipped: order.shipped,
       cancelled_at: order.cancelled_at,
-      freeShippingMinPackages: parseInt(env.FREE_SHIPPING_MIN_PACKAGES, 10) || 10,
-      shippingFeeTwd: parseInt(env.SHIPPING_FEE_TWD, 10) || 80,
+      shippingFeeTwd: parseInt(env.SHIPPING_FEE_TWD, 10) || 150,
     })}
   />
 </Layout>
