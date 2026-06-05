@@ -34,6 +34,26 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// --- V6 forgot-password reset-token helpers ---
+// We store the SHA-256 hash of the reset token in admin_users.reset_token, never the
+// plaintext. The plaintext only travels inside the Telegram reset link. A leaked DB backup
+// therefore can't be used to forge a reset (SHA-256 is one-way). The token itself is a
+// 128-bit random value (not a low-entropy human password), so a single SHA-256 is sufficient
+// — no PBKDF2 stretching needed (and it keeps us well under the Workers 10ms CPU cap).
+export async function sha256Hex(input: string): Promise<string> {
+  const digest = await subtle.digest("SHA-256", enc.encode(input));
+  return bytesToHex(new Uint8Array(digest));
+}
+
+// Generate an opaque single-use reset token. Returns BOTH the plaintext (goes in the link)
+// and its SHA-256 hash (stored in the DB column). 32 random bytes → 64 hex chars.
+export async function generateResetToken(): Promise<{ token: string; hash: string }> {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = bytesToHex(bytes);
+  const hash = await sha256Hex(token);
+  return { token, hash };
+}
+
 async function pbkdf2(
   plaintext: string,
   salt: Uint8Array,
