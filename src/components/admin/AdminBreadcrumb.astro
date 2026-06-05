@@ -1,0 +1,33 @@
+---
+// V6 §5.7 — admin breadcrumb. Pure presentational, no client JS.
+// Usage:
+//   <AdminBreadcrumb items={[{ label: "後台首頁", href: "/admin" }, { label: "商品" }]} />
+// The last item is the current page (no href -> rendered as plain aria-current text).
+interface Crumb {
+  label: string;
+  href?: string;
+}
+interface Props {
+  items: Crumb[];
+}
+const { items } = Astro.props;
+---
+
+<nav aria-label="麵包屑" class="mb-4 text-sm text-gray-600" data-admin-breadcrumb>
+  <ol class="flex flex-wrap items-center gap-1">
+    {items.map((c, i) => (
+      <li class="flex items-center gap-1">
+        {i > 0 && <span aria-hidden="true" class="text-gray-300">/</span>}
+        {c.href ? (
+          <a href={c.href} class="rounded px-1 py-0.5 hover:bg-mango-100 hover:text-mango-700 underline">
+            {c.label}
+          </a>
+        ) : (
+          <span aria-current="page" class="px-1 py-0.5 font-medium text-gray-800">
+            {c.label}
+          </span>
+        )}
+      </li>
+    ))}
+  </ol>
+</nav>
