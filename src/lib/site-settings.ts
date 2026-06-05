@@ -14,6 +14,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { makeDb, type AppEnv } from "../db/client";
 import { products, product_groups, seasons } from "../db/schema";
+import { parseShippingConfig, type ShippingConfig } from "./shipping";
 
 export interface SiteSettings {
   accepting_dry: boolean;
@@ -36,6 +37,10 @@ export interface SiteSettings {
   }>;
   shipping_fee_twd: number;
   free_shipping_min_packages: number;
+  // V6 §5.5: active season's parsed shipping policy. Frontend uses this to render
+  // the fee line / FAQ and to bake a JSON island for client-side shipping preview.
+  // shipping_fee_twd above is kept (legacy field) and now derives from shipping_config.
+  shipping_config: ShippingConfig;
   eta_days_after_payment: number;
   bank_account_display: string;
   support_line_id: string;
@@ -43,6 +48,15 @@ export interface SiteSettings {
 
 export async function loadSiteSettings(env: AppEnv): Promise<SiteSettings> {
   const db = makeDb(env);
+
+  // V6 §5.5: active season shipping policy. Queried separately so it resolves even when
+  // the season has zero products yet (productRows would be empty in that case).
+  const activeSeasonRows = await db
+    .select({ shipping_config: seasons.shipping_config })
+    .from(seasons)
+    .where(eq(seasons.status, "active"))
+    .limit(1);
+  const shippingConfig = parseShippingConfig(activeSeasonRows[0]?.shipping_config ?? null);
 
   // Pull active-season products + their group's pool weight in one JOIN.
   // (Tiny scale — ~5 SKUs in active season — so no caching layer needed.)
@@ -85,8 +99,17 @@ export async function loadSiteSettings(env: AppEnv): Promise<SiteSettings> {
       group_name: p.group_name,
       derived_available_count: Math.floor(p.group_stock_fen / p.package_fen),
     })),
-    shipping_fee_twd: parseInt(env.SHIPPING_FEE_TWD, 10) || 150,
-    free_shipping_min_packages: parseInt(env.FREE_SHIPPING_MIN_PACKAGES, 10) || 10,
+    // V6: legacy field now derives from shipping_config (the "base" fee charged below
+    // threshold / always for flat). Kept so any V1-era client reading it still works.
+    shipping_fee_twd: shippingConfig.fee_twd,
+    // Legacy field — V6 threshold uses fen (free_over_fen), not package count. For a
+    // threshold_jin config we surface the 斤 figure (free_over_fen/100) as a best-effort
+    // back-compat value; flat configs report 0 (no threshold). Not used by V6 UI.
+    free_shipping_min_packages:
+      shippingConfig.type === "threshold_jin"
+        ? Math.floor(shippingConfig.free_over_fen / 100)
+        : 0,
+    shipping_config: shippingConfig,
     eta_days_after_payment: parseInt(env.ETA_DAYS_AFTER_PAYMENT, 10) || 5,
     bank_account_display: env.BANK_ACCOUNT_DISPLAY,
     support_line_id: "", // legacy field, kept for V1 client compat
