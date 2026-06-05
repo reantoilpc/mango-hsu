@@ -5,6 +5,7 @@ import {
   parseShippingConfig,
   computeShipping,
   totalFenOf,
+  describeShipping,
   DEFAULT_SHIPPING_CONFIG,
   type ShippingConfig,
 } from "../src/lib/shipping";
@@ -131,5 +132,24 @@ describe("computeShipping — threshold_jin", () => {
 
   it("0 件 (totalFen=0) charges 0 even under threshold", () => {
     expect(computeShipping(0, thr)).toBe(0);
+  });
+});
+
+describe("describeShipping", () => {
+  it("flat fee", () => {
+    expect(describeShipping({ type: "flat", fee_twd: 150 })).toBe("每筆訂單運費 $150 元。");
+  });
+  it("flat free", () => {
+    expect(describeShipping({ type: "flat", fee_twd: 0 })).toBe("全館免運。");
+  });
+  it("threshold whole 斤", () => {
+    expect(
+      describeShipping({ type: "threshold_jin", free_over_fen: 1000, fee_twd: 150 }),
+    ).toBe("滿 10 斤免運，未滿每筆訂單運費 $150 元。");
+  });
+  it("threshold fractional 斤", () => {
+    expect(
+      describeShipping({ type: "threshold_jin", free_over_fen: 50, fee_twd: 150 }),
+    ).toBe("滿 0.50 斤免運，未滿每筆訂單運費 $150 元。");
   });
 });

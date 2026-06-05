@@ -3,8 +3,10 @@ import Layout from "../layouts/Layout.astro";
 import ProductCard from "../components/ProductCard.astro";
 import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
+import { describeShipping } from "../lib/shipping";
 
 const settings = await loadSiteSettings(env);
+const shipDesc = describeShipping(settings.shipping_config);
 ---
 
 <Layout title="產品 · 芒果許">
@@ -43,7 +45,7 @@ const settings = await loadSiteSettings(env);
       <div>
         <h3 class="font-semibold text-base mb-1">運費怎麼算？</h3>
         <p class="text-mango-700">
-          每筆訂單運費 ${settings.shipping_fee_twd} 元。
+          {shipDesc}
         </p>
       </div>
 

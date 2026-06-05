@@ -2,6 +2,7 @@
 import Layout from "../layouts/Layout.astro";
 import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
+import { describeShipping } from "../lib/shipping";
 
 const settings = await loadSiteSettings(env);
 // V5.2: only show items the customer can actually buy — admin keeping it on the menu
@@ -11,6 +12,7 @@ const sellable = settings.products.filter(
 );
 const shipFee = settings.shipping_fee_twd;
 const shipConfig = settings.shipping_config;
+const shipDesc = describeShipping(shipConfig);
 ---
 
 <Layout title="下訂 · 芒果許">
@@ -44,7 +46,7 @@ const shipConfig = settings.shipping_config;
         <>
           <h1 class="text-3xl font-bold mb-1">下訂</h1>
           <p class="text-mango-700 mb-8 text-sm">
-            每筆訂單運費 ${shipFee} 元。
+            {shipDesc}
           </p>
 
           <form

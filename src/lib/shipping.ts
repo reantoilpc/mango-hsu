@@ -71,3 +71,16 @@ export function computeShipping(totalFen: number, config: ShippingConfig): numbe
   // threshold_jin
   return totalFen >= config.free_over_fen ? 0 : config.fee_twd;
 }
+
+// Human-readable Traditional-Chinese description of a shipping policy, for the
+// fee line + FAQ. fen→斤 conversion is /100.
+export function describeShipping(config: ShippingConfig): string {
+  if (config.type === "flat") {
+    return config.fee_twd === 0
+      ? "全館免運。"
+      : `每筆訂單運費 $${config.fee_twd} 元。`;
+  }
+  const jin = config.free_over_fen / 100;
+  const jinText = Number.isInteger(jin) ? `${jin}` : jin.toFixed(2);
+  return `滿 ${jinText} 斤免運，未滿每筆訂單運費 $${config.fee_twd} 元。`;
+}
