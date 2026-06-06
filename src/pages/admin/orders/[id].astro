@@ -73,6 +73,7 @@ const sellableForNew = productRows
     variant: p.variant,
     price: p.price,
     stock: p.stock,
+    package_fen: p.package_fen,
   }));
 
 const cancelledMeta =
@@ -322,6 +323,7 @@ const cancelledMeta =
     import { createDirtyTracker, type DirtyState } from "../../../lib/dirty-tracker";
     import { itemsHash } from "../../../lib/items-hash";
     import { formatTaipei } from "../../../lib/formatters";
+    import { shippingFeeFor, totalFenOf } from "../../../lib/shipping-fee";
 
     interface ItemWorking {
       sku: string;
@@ -333,6 +335,7 @@ const cancelledMeta =
       variant: string;
       price: number;
       stock: number;
+      package_fen: number;
     }
     interface ExpectedState {
       paid: boolean;
@@ -399,15 +402,17 @@ const cancelledMeta =
       // ever drift.
       if (itemsDirtyCount() === 0) return;
       let subtotal = 0;
-      let totalQty = 0;
+      const fenItems: { package_fen: number; qty: number }[] = [];
       for (const w of working) {
         const p = productMap.get(w.sku);
-        if (p) subtotal += p.price * w.qty;
-        totalQty += w.qty;
+        if (p) {
+          subtotal += p.price * w.qty;
+          fenItems.push({ package_fen: p.package_fen, qty: w.qty });
+        }
       }
-      // Mirrors src/lib/order-response.ts shippingFor — flat fee per order.
-      // Server is authoritative; this is just a preview for the dirty state.
-      const shipping = totalQty > 0 ? shippingFeeTwd : 0;
+      // Same pure function as the server (src/lib/shipping-fee.ts) and the customer
+      // order page → 滿10斤免運 preview can't drift from the charged fee.
+      const shipping = shippingFeeFor(totalFenOf(fenItems), shippingFeeTwd);
       const subEl = document.getElementById("items-subtotal");
       const shipEl = document.getElementById("items-shipping");
       const totEl = document.getElementById("items-total");
