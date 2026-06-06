@@ -83,7 +83,7 @@ export const POST: APIRoute = async ({ request, locals: _locals }) => {
   for (const r of resolved.resolved) {
     subtotal += r.price * r.qty;
   }
-  const shipping = shippingFor(body.items, env);
+  const shipping = shippingFor(resolved.resolved, env);
   const total = subtotal + shipping;
 
   // 4) Read group stock_fen BEFORE the CAS for audit before/after.

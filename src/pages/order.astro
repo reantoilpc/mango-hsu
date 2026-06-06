@@ -2,6 +2,7 @@
 import Layout from "../layouts/Layout.astro";
 import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
+import { FREE_SHIPPING_OVER_FEN } from "../lib/shipping-fee";
 
 const settings = await loadSiteSettings(env);
 // V5.2: only show items the customer can actually buy — admin keeping it on the menu
@@ -10,6 +11,7 @@ const sellable = settings.products.filter(
   (p) => p.available && p.derived_available_count > 0,
 );
 const shipFee = settings.shipping_fee_twd;
+const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
 ---
 
 <Layout title="下訂 · 芒果許">
@@ -43,7 +45,7 @@ const shipFee = settings.shipping_fee_twd;
         <>
           <h1 class="text-3xl font-bold mb-1">下訂</h1>
           <p class="text-mango-700 mb-8 text-sm">
-            每筆訂單運費 ${shipFee} 元。
+            滿 {freeOverJin} 斤免運，未滿每筆訂單運費 ${shipFee} 元。
           </p>
 
           <form
@@ -115,6 +117,7 @@ const shipFee = settings.shipping_fee_twd;
                       name={`qty_${p.sku}`}
                       data-sku={p.sku}
                       data-price={p.price}
+                      data-package-fen={p.package_fen}
                       min="0"
                       max={Math.min(99, p.derived_available_count)}
                       value="0"
@@ -302,6 +305,7 @@ const shipFee = settings.shipping_fee_twd;
 <script>
   import { submitOrder, newIdempotencyKey } from "../lib/api";
   import type { OrderItem } from "../lib/types";
+  import { shippingFeeFor, totalFenOf } from "../lib/shipping-fee";
   import QRCode from "qrcode";
 
   const form = document.getElementById("order-form") as HTMLFormElement | null;
@@ -316,26 +320,35 @@ const shipFee = settings.shipping_fee_twd;
     const submitBtn = document.getElementById("submit-btn") as HTMLButtonElement;
     const pdpa = document.getElementById("pdpa") as HTMLInputElement;
 
-    function computeItems(): { items: OrderItem[]; totalQty: number; subtotal: number } {
+    function computeItems(): {
+      items: OrderItem[];
+      totalQty: number;
+      subtotal: number;
+      totalFen: number;
+    } {
       const items: OrderItem[] = [];
       let totalQty = 0;
       let subtotal = 0;
+      const fenItems: { package_fen: number; qty: number }[] = [];
       qtyInputs.forEach((el) => {
         const qty = Math.max(0, Math.floor(Number(el.value) || 0));
         if (qty > 0) {
           const sku = el.dataset.sku as OrderItem["sku"];
           const price = Number(el.dataset.price ?? 0);
+          const packageFen = Number(el.dataset.packageFen ?? 0);
           items.push({ sku, qty });
           totalQty += qty;
           subtotal += price * qty;
+          fenItems.push({ package_fen: packageFen, qty });
         }
       });
-      return { items, totalQty, subtotal };
+      return { items, totalQty, subtotal, totalFen: totalFenOf(fenItems) };
     }
 
     function recomputeSummary() {
-      const { totalQty, subtotal } = computeItems();
-      const shipping = totalQty > 0 ? shipFee : 0;
+      const { subtotal, totalFen } = computeItems();
+      // Same pure function as the server (src/lib/shipping-fee.ts) → preview can't drift.
+      const shipping = shippingFeeFor(totalFen, shipFee);
       const total = subtotal + shipping;
       subtotalEl.textContent = `$${subtotal}`;
       shippingEl.textContent = `$${shipping}`;

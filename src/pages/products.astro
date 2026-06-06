@@ -3,8 +3,10 @@ import Layout from "../layouts/Layout.astro";
 import ProductCard from "../components/ProductCard.astro";
 import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
+import { FREE_SHIPPING_OVER_FEN } from "../lib/shipping-fee";
 
 const settings = await loadSiteSettings(env);
+const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
 ---
 
 <Layout title="產品 · 芒果許">
@@ -43,7 +45,7 @@ const settings = await loadSiteSettings(env);
       <div>
         <h3 class="font-semibold text-base mb-1">運費怎麼算？</h3>
         <p class="text-mango-700">
-          每筆訂單運費 ${settings.shipping_fee_twd} 元。
+          滿 {freeOverJin} 斤免運，未滿每筆訂單運費 ${settings.shipping_fee_twd} 元。
         </p>
       </div>
 

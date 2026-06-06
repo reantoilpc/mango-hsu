@@ -318,7 +318,7 @@ export const POST: APIRoute = async ({ request, params }) => {
         const unit = ex ? ex.unit_price : r.price;
         return s + unit * r.qty;
       }, 0);
-      newShipping = shippingFor(body.items!, env);
+      newShipping = shippingFor(resolvedNew.resolved, env);
       newTotal = newSubtotal + newShipping;
       auditedChanges.items = {
         before: currentItems.map((e) => ({ sku: e.sku, qty: e.qty, product_id: e.product_id })),

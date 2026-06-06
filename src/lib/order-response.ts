@@ -1,6 +1,7 @@
 import type { AppEnv } from "../db/client";
 import type { Order, OrderItem, Product } from "../db/schema";
 import { buildLiffBindUrl } from "./line";
+import { shippingFeeFor, totalFenOf } from "./shipping-fee";
 
 export interface OrderSuccess {
   ok: true;
@@ -44,11 +45,16 @@ export type OrderResponse = OrderSuccess | OrderError;
 
 // Relative URL so the customer's status link works regardless of which env
 // (stage / prod / future custom domain) the order was placed on. Same-origin.
-export function shippingFor(items: Array<{ qty: number }>, env: AppEnv): number {
-  // Flat shipping fee per order — no free-shipping threshold (policy: 運費一律收取).
-  const totalQty = items.reduce((s, i) => s + i.qty, 0);
+// 滿 10 斤免運、未滿收 env.SHIPPING_FEE_TWD（門檻/重量邏輯見 src/lib/shipping-fee.ts，
+// 前端 order.astro 預覽共用同一個純函式，避免前後台運費算法 drift）。
+// items must carry package_fen — callers pass the resolved-product snapshot
+// (resolveItemsForStock → resolved.resolved), not the raw customer {sku, qty}.
+export function shippingFor(
+  items: Array<{ qty: number; package_fen: number }>,
+  env: AppEnv,
+): number {
   const fee = parseInt(env.SHIPPING_FEE_TWD, 10) || 150;
-  return totalQty > 0 ? fee : 0;
+  return shippingFeeFor(totalFenOf(items), fee);
 }
 
 export function expectedMemoFor(orderId: string, name: string): string {

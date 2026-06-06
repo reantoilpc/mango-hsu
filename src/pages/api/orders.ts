@@ -122,7 +122,8 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   for (const r of resolved.resolved) {
     subtotal += r.price * r.qty;
   }
-  const shipping = shippingFor(body.items, env);
+  // resolved.resolved carries package_fen → shippingFor computes 斤 for the free-shipping threshold.
+  const shipping = shippingFor(resolved.resolved, env);
   const total = subtotal + shipping;
 
   // 5) Read group stock_fen BEFORE the CAS so we can write before/after into audit_log.
