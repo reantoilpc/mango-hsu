@@ -21,6 +21,15 @@ const adminNavItems = isAdminShell
   ? navItemsForRole((session!.role as AdminRole) === "admin" ? "admin" : "operator")
   : [];
 const adminActiveKey = isAdminShell ? activeNavKey(pathname) : null;
+
+// Inline SVG favicon (mango motif) so the browser stops fetching a missing
+// /favicon.ico (which 404s on every page, polluting the console). The data URI
+// is encodeURIComponent'd so the SVG never hits HTML-attribute parsing.
+const faviconHref =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#fef3c7"/><path fill="#f59e0b" d="M18.9 6.4C17.2 4 14 3 11 4.4 7.7 5.9 5.4 8.9 5 12.3c-.3 2.5.7 5 2.8 6.5 2 1.4 4.7 1.5 6.9.3 3.1-1.7 5.3-5 5.6-8.5.1-1.5-.2-3-1.4-4.2z"/></svg>',
+  );
 ---
 
 <!doctype html>
@@ -29,6 +38,7 @@ const adminActiveKey = isAdminShell ? activeNavKey(pathname) : null;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content={description} />
+    <link rel="icon" href={faviconHref} />
     <link
       rel="preconnect"
       href="https://fonts.googleapis.com"
