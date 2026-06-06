@@ -25,7 +25,6 @@ export interface SiteSettings {
   accepting_dry: boolean;
   products: Product[];
   shipping_fee_twd: number;
-  free_shipping_min_packages: number;
   eta_days_after_payment: number;
   bank_account_display: string;
   support_line_id: string;

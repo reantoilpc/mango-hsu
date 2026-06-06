@@ -35,7 +35,6 @@ export interface SiteSettings {
     derived_available_count: number;
   }>;
   shipping_fee_twd: number;
-  free_shipping_min_packages: number;
   eta_days_after_payment: number;
   bank_account_display: string;
   support_line_id: string;
@@ -86,7 +85,6 @@ export async function loadSiteSettings(env: AppEnv): Promise<SiteSettings> {
       derived_available_count: Math.floor(p.group_stock_fen / p.package_fen),
     })),
     shipping_fee_twd: parseInt(env.SHIPPING_FEE_TWD, 10) || 150,
-    free_shipping_min_packages: parseInt(env.FREE_SHIPPING_MIN_PACKAGES, 10) || 10,
     eta_days_after_payment: parseInt(env.ETA_DAYS_AFTER_PAYMENT, 10) || 5,
     bank_account_display: env.BANK_ACCOUNT_DISPLAY,
     support_line_id: "", // legacy field, kept for V1 client compat
