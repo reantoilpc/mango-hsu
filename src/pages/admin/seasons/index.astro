@@ -4,6 +4,7 @@ import { makeDb } from "../../../db/client";
 import { seasons, orders } from "../../../db/schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { env } from "../../../lib/env";
+import { parseShippingConfig } from "../../../lib/shipping";
 
 const session = Astro.locals.session;
 if (!session) return Astro.redirect("/admin/login");
@@ -14,7 +15,14 @@ if (session.role !== "admin") {
 const db = makeDb(env);
 
 const seasonRows = await db
-  .select()
+  .select({
+    id: seasons.id,
+    code: seasons.code,
+    name: seasons.name,
+    status: seasons.status,
+    created_at: seasons.created_at,
+    shipping_config: seasons.shipping_config,
+  })
   .from(seasons)
   .orderBy(desc(seasons.created_at));
 
@@ -101,6 +109,10 @@ const statusClass: Record<string, string> = {
       )}
       {seasonRows.map((s) => {
         const unshipped = unshippedBySeason.get(s.id) ?? 0;
+        const ship = parseShippingConfig(s.shipping_config);
+        // 顯示給店主用「斤」(free_over_fen/100)，儲存時再換回 fen。
+        const freeOverJin =
+          ship.type === "threshold_jin" ? ship.free_over_fen / 100 : "";
         return (
           <article
             class="rounded border border-gray-200 bg-white p-4"
@@ -143,6 +155,94 @@ const statusClass: Record<string, string> = {
               <p class="mt-2 text-xs text-amber-700">
                 ⚠️ 此年度尚有 {unshipped} 筆未出貨訂單，封存前請先處理（或確認後強制封存）。
               </p>
+            )}
+            {s.status === "active" && (
+              <div class="mt-4 border-t border-gray-100 pt-4" data-shipping-config>
+                <h3 class="mb-2 text-sm font-bold">運費設定</h3>
+                <form data-shipping-form class="space-y-3">
+                  <fieldset class="flex flex-wrap gap-4">
+                    <label class="inline-flex items-center gap-1.5 text-sm">
+                      <input
+                        type="radio"
+                        name="shipping_type"
+                        value="flat"
+                        checked={ship.type === "flat"}
+                        class="h-4 w-4 accent-mango-600"
+                      />
+                      固定運費
+                    </label>
+                    <label class="inline-flex items-center gap-1.5 text-sm">
+                      <input
+                        type="radio"
+                        name="shipping_type"
+                        value="threshold_jin"
+                        checked={ship.type === "threshold_jin"}
+                        class="h-4 w-4 accent-mango-600"
+                      />
+                      滿 N 斤免運
+                    </label>
+                  </fieldset>
+
+                  <div
+                    data-ship-fields="flat"
+                    class={ship.type === "flat" ? "" : "hidden"}
+                  >
+                    <label class="block text-xs text-gray-600">
+                      運費（元）
+                      <input
+                        type="number"
+                        name="flat_fee_twd"
+                        min="0"
+                        step="1"
+                        value={ship.fee_twd}
+                        class="mt-1 block w-32 rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                      />
+                    </label>
+                  </div>
+
+                  <div
+                    data-ship-fields="threshold_jin"
+                    class={`flex flex-wrap gap-4 ${ship.type === "threshold_jin" ? "" : "hidden"}`}
+                  >
+                    <label class="block text-xs text-gray-600">
+                      滿 ___ 斤免運
+                      <input
+                        type="number"
+                        name="free_over_jin"
+                        min="0"
+                        step="0.5"
+                        value={freeOverJin}
+                        class="mt-1 block w-32 rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                        placeholder="例 10"
+                      />
+                    </label>
+                    <label class="block text-xs text-gray-600">
+                      未滿運費（元）
+                      <input
+                        type="number"
+                        name="threshold_fee_twd"
+                        min="0"
+                        step="1"
+                        value={ship.fee_twd}
+                        class="mt-1 block w-32 rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <button
+                      type="submit"
+                      data-action="save-shipping"
+                      class="inline-flex items-center justify-center rounded bg-mango-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
+                    >
+                      儲存運費
+                    </button>
+                  </div>
+                  <p class="text-xs text-gray-500">
+                    「滿 N 斤免運」的 N 以斤為單位（例：滿 10 斤免運）。
+                  </p>
+                </form>
+              </div>
             )}
           </article>
         );
@@ -296,6 +396,99 @@ const statusClass: Record<string, string> = {
             btn.textContent = orig;
           }
         });
+      });
+    });
+
+    // --- 運費設定（僅當季 card 有 [data-shipping-config]）---
+    document.querySelectorAll<HTMLElement>("[data-season-card]").forEach((card) => {
+      const id = Number(card.dataset.seasonId);
+      const box = card.querySelector<HTMLElement>("[data-shipping-config]");
+      if (!box) return;
+      const form = box.querySelector<HTMLFormElement>("[data-shipping-form]");
+      if (!form) return;
+
+      const flatFields = form.querySelector<HTMLElement>('[data-ship-fields="flat"]')!;
+      const thrFields = form.querySelector<HTMLElement>('[data-ship-fields="threshold_jin"]')!;
+      const saveBtn = form.querySelector<HTMLButtonElement>('button[data-action="save-shipping"]')!;
+
+      function currentType(): "flat" | "threshold_jin" {
+        const sel = form!.querySelector<HTMLInputElement>('input[name="shipping_type"]:checked');
+        return sel?.value === "threshold_jin" ? "threshold_jin" : "flat";
+      }
+
+      // 切換模式時顯示/隱藏對應欄位。
+      function syncFields() {
+        const t = currentType();
+        flatFields.classList.toggle("hidden", t !== "flat");
+        thrFields.classList.toggle("hidden", t !== "threshold_jin");
+      }
+      form.querySelectorAll<HTMLInputElement>('input[name="shipping_type"]').forEach((r) => {
+        r.addEventListener("change", syncFields);
+      });
+      syncFields();
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const t = currentType();
+
+        let shippingConfig:
+          | { type: "flat"; fee_twd: number }
+          | { type: "threshold_jin"; free_over_fen: number; fee_twd: number };
+
+        if (t === "flat") {
+          const fee = Number(
+            form.querySelector<HTMLInputElement>('input[name="flat_fee_twd"]')!.value,
+          );
+          if (!Number.isInteger(fee) || fee < 0) {
+            showToast("運費需為 0 以上的整數。", { kind: "error" });
+            return;
+          }
+          shippingConfig = { type: "flat", fee_twd: fee };
+        } else {
+          const jin = Number(
+            form.querySelector<HTMLInputElement>('input[name="free_over_jin"]')!.value,
+          );
+          const fee = Number(
+            form.querySelector<HTMLInputElement>('input[name="threshold_fee_twd"]')!.value,
+          );
+          // 顯示用「斤」→ 儲存用 fen：斤 × 100。
+          const freeOverFen = Math.round(jin * 100);
+          if (!Number.isFinite(jin) || freeOverFen <= 0) {
+            showToast("免運門檻（斤）需大於 0。", { kind: "error" });
+            return;
+          }
+          if (!Number.isInteger(fee) || fee < 0) {
+            showToast("未滿運費需為 0 以上的整數。", { kind: "error" });
+            return;
+          }
+          shippingConfig = { type: "threshold_jin", free_over_fen: freeOverFen, fee_twd: fee };
+        }
+
+        saveBtn.disabled = true;
+        const orig = saveBtn.textContent;
+        saveBtn.textContent = "儲存中...";
+        try {
+          const { status, data, raw } = await callJson(
+            `/api/admin/seasons/${id}/shipping-config`,
+            "PATCH",
+            { shipping_config: shippingConfig },
+          );
+          if (status === 200 && data && data.ok) {
+            flashToast("已更新運費設定", { kind: "success" });
+            location.reload();
+            return;
+          }
+          const fail = data as ApiFail | null;
+          showToast(`儲存失敗：${fail?.message ?? fail?.error_code ?? raw ?? status}`, {
+            kind: "error",
+          });
+          saveBtn.disabled = false;
+          saveBtn.textContent = orig;
+        } catch {
+          showToast("網路錯誤，請稍後再試。", { kind: "error" });
+          saveBtn.disabled = false;
+          saveBtn.textContent = orig;
+        }
       });
     });
 
