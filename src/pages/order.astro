@@ -13,6 +13,11 @@ const sellable = settings.products.filter(
 const shipFee = settings.shipping_fee_twd;
 const shipConfig = settings.shipping_config;
 const shipDesc = describeShipping(shipConfig);
+// SSR-baked group_id → group_name so the client-side sold-out message can name the
+// flavour. The client <script> must NOT reference `settings` (a server const, not in
+// client scope) — doing so threw a ReferenceError that swallowed the sold-out message.
+const groupNameById: Record<number, string> = {};
+for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
 ---
 
 <Layout title="下訂 · 芒果許">
@@ -308,6 +313,12 @@ const shipDesc = describeShipping(shipConfig);
     id="ship-config"
     set:html={JSON.stringify(shipConfig)}
   />
+  <script
+    is:inline
+    type="application/json"
+    id="group-names"
+    set:html={JSON.stringify(groupNameById)}
+  />
 </Layout>
 
 <script>
@@ -318,6 +329,12 @@ const shipDesc = describeShipping(shipConfig);
   const form = document.getElementById("order-form") as HTMLFormElement | null;
   if (form) {
     const shipFee = Number(form.dataset.shipFee ?? 150);
+    // group_id → group_name baked by SSR (see frontmatter) so the sold-out branch can
+    // name the flavour without touching the server-only `settings` const.
+    const groupNamesNode = document.getElementById("group-names");
+    const groupNameById: Record<number, string> = groupNamesNode
+      ? JSON.parse(groupNamesNode.textContent || "{}")
+      : {};
     // V6 §5.5: shipping_config baked by SSR island so the live preview matches the server.
     type ShipConfig =
       | { type: "flat"; fee_twd: number }
@@ -432,7 +449,7 @@ const shipDesc = describeShipping(shipConfig);
         submitBtn.textContent = "送出訂單";
         const msg = res.error_code === "SOLD_OUT"
           ? (res.sold_out_group_id
-              ? `${settings.products.find((sp) => sp.group_id === res.sold_out_group_id)?.group_name ?? "選購商品"}庫存不足，請調整後重新送出。`
+              ? `${groupNameById[res.sold_out_group_id] ?? "選購商品"}庫存不足，請調整後重新送出。`
               : `品項 ${res.sku ?? ""} 剛剛售完，請調整後重新送出。`)
           : res.error_code === "unknown_product"
           ? "您選的商品已下架，請重新整理頁面。"
