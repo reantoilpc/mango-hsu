@@ -1,0 +1,497 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { makeDb } from "../../../db/client";
+import { seasons, orders } from "../../../db/schema";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { env } from "../../../lib/env";
+import { parseShippingConfig } from "../../../lib/shipping";
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+if (session.role !== "admin") {
+  return new Response("admin only", { status: 403 });
+}
+
+const db = makeDb(env);
+
+const seasonRows = await db
+  .select({
+    id: seasons.id,
+    code: seasons.code,
+    name: seasons.name,
+    status: seasons.status,
+    created_at: seasons.created_at,
+    shipping_config: seasons.shipping_config,
+  })
+  .from(seasons)
+  .orderBy(desc(seasons.created_at));
+
+// For each season, count unshipped non-cancelled orders so the UI can warn before
+// archive. One grouped query keyed by season_id.
+const unshippedRows = await db
+  .select({
+    season_id: orders.season_id,
+    n: sql<number>`count(*)`,
+  })
+  .from(orders)
+  .where(and(eq(orders.shipped, false), isNull(orders.cancelled_at)))
+  .groupBy(orders.season_id);
+
+const unshippedBySeason = new Map<number, number>();
+for (const r of unshippedRows) unshippedBySeason.set(r.season_id, r.n);
+
+const statusLabel: Record<string, string> = {
+  draft: "草稿",
+  active: "當季",
+  archived: "已封存",
+};
+const statusClass: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-700",
+  active: "bg-emerald-100 text-emerald-800",
+  archived: "bg-gray-100 text-gray-500",
+};
+---
+
+<Layout title="年度設定">
+  <main class="mx-auto max-w-3xl px-4 py-6 pb-12">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">年度設定</h1>
+      <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
+    </header>
+
+    <p class="mb-6 text-sm text-gray-600">
+      每一年的芒果季是一個「年度」。同時只能有一個「當季」。
+      建立新年度 → 設定商品與庫存 → 開賣時「啟用」（會自動把上一個當季封存）→ 季末「封存」。
+    </p>
+
+    <!-- 建立新年度 -->
+    <section class="mb-8 rounded border border-gray-200 bg-white p-4">
+      <h2 class="mb-3 text-lg font-bold">建立新年度</h2>
+      <form id="create-season-form" class="grid grid-cols-1 gap-2 sm:grid-cols-[8rem_1fr_5rem]">
+        <input
+          type="text"
+          name="code"
+          required
+          maxlength="20"
+          aria-label="年度代碼（英數，例 2027）"
+          class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+          placeholder="代碼：例 2027"
+        />
+        <input
+          type="text"
+          name="name"
+          required
+          maxlength="50"
+          aria-label="年度名稱（例 2027 芒果季）"
+          class="rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+          placeholder="名稱：例 2027 芒果季"
+        />
+        <button
+          type="submit"
+          class="inline-flex items-center justify-center rounded bg-mango-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
+        >
+          建立
+        </button>
+        <div class="create-error hidden sm:col-span-3 rounded bg-red-50 px-3 py-2 text-xs text-red-800"></div>
+      </form>
+      <p class="mt-2 text-xs text-gray-500">
+        新年度建立後為「草稿」，不影響目前販售。設定好商品/庫存再按「啟用」。
+      </p>
+    </section>
+
+    <!-- 歷年列表 -->
+    <section class="space-y-3">
+      <h2 class="text-lg font-bold">歷年</h2>
+      {seasonRows.length === 0 && (
+        <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+          尚無任何年度。請先用上方表單建立第一個年度。
+        </p>
+      )}
+      {seasonRows.map((s) => {
+        const unshipped = unshippedBySeason.get(s.id) ?? 0;
+        const ship = parseShippingConfig(s.shipping_config);
+        // 顯示給店主用「斤」(free_over_fen/100)，儲存時再換回 fen。
+        const freeOverJin =
+          ship.type === "threshold_jin" ? ship.free_over_fen / 100 : "";
+        return (
+          <article
+            class="rounded border border-gray-200 bg-white p-4"
+            data-season-card
+            data-season-id={s.id}
+            data-season-code={s.code}
+            data-season-status={s.status}
+            data-unshipped={unshipped}
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span class="text-lg font-bold">{s.name}</span>
+                <span class="ml-2 font-mono text-xs text-gray-500">{s.code}</span>
+                <span class={`ml-2 inline-block rounded px-2 py-0.5 text-xs ${statusClass[s.status] ?? ""}`}>
+                  {statusLabel[s.status] ?? s.status}
+                </span>
+              </div>
+              <div class="flex gap-2">
+                {s.status !== "active" && (
+                  <button
+                    type="button"
+                    data-action="activate"
+                    class="inline-flex items-center min-h-[44px] rounded border border-emerald-600 px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50"
+                  >
+                    啟用為當季
+                  </button>
+                )}
+                {s.status !== "archived" && (
+                  <button
+                    type="button"
+                    data-action="archive"
+                    class="inline-flex items-center min-h-[44px] rounded border border-gray-400 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    封存
+                  </button>
+                )}
+              </div>
+            </div>
+            {unshipped > 0 && (
+              <p class="mt-2 text-xs text-amber-700">
+                ⚠️ 此年度尚有 {unshipped} 筆未出貨訂單，封存前請先處理（或確認後強制封存）。
+              </p>
+            )}
+            {s.status === "active" && (
+              <div class="mt-4 border-t border-gray-100 pt-4" data-shipping-config>
+                <h3 class="mb-2 text-sm font-bold">運費設定</h3>
+                <form data-shipping-form class="space-y-3">
+                  <fieldset class="flex flex-wrap gap-4">
+                    <label class="inline-flex items-center gap-1.5 text-sm">
+                      <input
+                        type="radio"
+                        name="shipping_type"
+                        value="flat"
+                        checked={ship.type === "flat"}
+                        class="h-4 w-4 accent-mango-600"
+                      />
+                      固定運費
+                    </label>
+                    <label class="inline-flex items-center gap-1.5 text-sm">
+                      <input
+                        type="radio"
+                        name="shipping_type"
+                        value="threshold_jin"
+                        checked={ship.type === "threshold_jin"}
+                        class="h-4 w-4 accent-mango-600"
+                      />
+                      滿 N 斤免運
+                    </label>
+                  </fieldset>
+
+                  <div
+                    data-ship-fields="flat"
+                    class={ship.type === "flat" ? "" : "hidden"}
+                  >
+                    <label class="block text-xs text-gray-600">
+                      運費（元）
+                      <input
+                        type="number"
+                        name="flat_fee_twd"
+                        min="0"
+                        step="1"
+                        value={ship.fee_twd}
+                        class="mt-1 block w-32 rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                      />
+                    </label>
+                  </div>
+
+                  <div
+                    data-ship-fields="threshold_jin"
+                    class={`flex flex-wrap gap-4 ${ship.type === "threshold_jin" ? "" : "hidden"}`}
+                  >
+                    <label class="block text-xs text-gray-600">
+                      滿 ___ 斤免運
+                      <input
+                        type="number"
+                        name="free_over_jin"
+                        min="0"
+                        step="0.5"
+                        value={freeOverJin}
+                        class="mt-1 block w-32 rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                        placeholder="例 10"
+                      />
+                    </label>
+                    <label class="block text-xs text-gray-600">
+                      未滿運費（元）
+                      <input
+                        type="number"
+                        name="threshold_fee_twd"
+                        min="0"
+                        step="1"
+                        value={ship.fee_twd}
+                        class="mt-1 block w-32 rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <button
+                      type="submit"
+                      data-action="save-shipping"
+                      class="inline-flex items-center justify-center rounded bg-mango-600 px-3 py-2 min-h-[44px] text-sm text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
+                    >
+                      儲存運費
+                    </button>
+                  </div>
+                  <p class="text-xs text-gray-500">
+                    「滿 N 斤免運」的 N 以斤為單位（例：滿 10 斤免運）。
+                  </p>
+                </form>
+              </div>
+            )}
+          </article>
+        );
+      })}
+    </section>
+  </main>
+
+  <script>
+    import { showToast, flashToast, consumeFlash } from "../../../lib/toast";
+
+    interface ApiOk {
+      ok: true;
+      [k: string]: unknown;
+    }
+    interface ApiFail {
+      ok: false;
+      error_code: string;
+      message?: string;
+      unshipped_count?: number;
+    }
+
+    async function callJson(
+      url: string,
+      method: "POST" | "PATCH",
+      body: Record<string, unknown>,
+    ): Promise<{ status: number; data: ApiOk | ApiFail | null; raw: string }> {
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body),
+      });
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        return { status: res.status, data: null, raw: await res.text() };
+      }
+      return { status: res.status, data: (await res.json()) as ApiOk | ApiFail, raw: "" };
+    }
+
+    // --- 建立新年度 ---
+    const createForm = document.getElementById("create-season-form") as HTMLFormElement | null;
+    if (createForm) {
+      const errEl = createForm.querySelector<HTMLElement>(".create-error")!;
+      const submitBtn = createForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+      createForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errEl.classList.add("hidden");
+        const fd = new FormData(createForm);
+        const code = String(fd.get("code") ?? "").trim();
+        const name = String(fd.get("name") ?? "").trim();
+        if (!/^[A-Za-z0-9_-]{1,20}$/.test(code)) {
+          errEl.textContent = "代碼需為 1-20 字英數（例 2027）。";
+          errEl.classList.remove("hidden");
+          return;
+        }
+        if (name.length === 0 || name.length > 50) {
+          errEl.textContent = "名稱需 1-50 字。";
+          errEl.classList.remove("hidden");
+          return;
+        }
+        submitBtn.disabled = true;
+        const orig = submitBtn.textContent;
+        submitBtn.textContent = "建立中...";
+        try {
+          const { status, data, raw } = await callJson("/api/admin/seasons", "POST", {
+            code,
+            name,
+          });
+          if (status === 200 && data && data.ok) {
+            flashToast(`已建立年度「${name}」（草稿）`, { kind: "success" });
+            location.reload();
+            return;
+          }
+          const fail = data as ApiFail | null;
+          if (fail?.error_code === "CODE_EXISTS") {
+            errEl.textContent = `代碼「${code}」已存在，請換一個。`;
+          } else {
+            errEl.textContent = `建立失敗：${fail?.message ?? fail?.error_code ?? raw ?? status}`;
+          }
+          errEl.classList.remove("hidden");
+        } catch {
+          errEl.textContent = "網路錯誤，請稍後再試。";
+          errEl.classList.remove("hidden");
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = orig;
+        }
+      });
+    }
+
+    // --- 啟用 / 封存 ---
+    document.querySelectorAll<HTMLElement>("[data-season-card]").forEach((card) => {
+      const id = Number(card.dataset.seasonId);
+      const code = card.dataset.seasonCode ?? "";
+      const unshipped = Number(card.dataset.unshipped ?? "0");
+
+      card.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const action = btn.dataset.action as "activate" | "archive";
+
+          if (action === "activate") {
+            if (!confirm(`確定把「${code}」設為當季嗎？目前的當季會自動封存。`)) return;
+          }
+
+          let force = false;
+          if (action === "archive") {
+            if (unshipped > 0) {
+              if (
+                !confirm(
+                  `「${code}」還有 ${unshipped} 筆未出貨訂單。仍要強制封存嗎？（建議先出完貨）`,
+                )
+              ) {
+                return;
+              }
+              force = true;
+            } else if (!confirm(`確定封存「${code}」嗎？`)) {
+              return;
+            }
+          }
+
+          btn.disabled = true;
+          const orig = btn.textContent;
+          btn.textContent = "處理中...";
+          try {
+            const url = `/api/admin/seasons/${id}/${action}`;
+            const { status, data, raw } = await callJson(url, "PATCH", force ? { force: true } : {});
+            if (status === 200 && data && data.ok) {
+              flashToast(
+                action === "activate" ? `已啟用「${code}」為當季` : `已封存「${code}」`,
+                { kind: "success" },
+              );
+              location.reload();
+              return;
+            }
+            const fail = data as ApiFail | null;
+            if (fail?.error_code === "UNSHIPPED_ORDERS") {
+              showToast(
+                `此年度尚有 ${fail.unshipped_count ?? "?"} 筆未出貨訂單，無法封存。`,
+                { kind: "error" },
+              );
+            } else {
+              showToast(`操作失敗：${fail?.message ?? fail?.error_code ?? raw ?? status}`, {
+                kind: "error",
+              });
+            }
+            btn.disabled = false;
+            btn.textContent = orig;
+          } catch {
+            showToast("網路錯誤，請稍後再試。", { kind: "error" });
+            btn.disabled = false;
+            btn.textContent = orig;
+          }
+        });
+      });
+    });
+
+    // --- 運費設定（僅當季 card 有 [data-shipping-config]）---
+    document.querySelectorAll<HTMLElement>("[data-season-card]").forEach((card) => {
+      const id = Number(card.dataset.seasonId);
+      const box = card.querySelector<HTMLElement>("[data-shipping-config]");
+      if (!box) return;
+      const form = box.querySelector<HTMLFormElement>("[data-shipping-form]");
+      if (!form) return;
+
+      const flatFields = form.querySelector<HTMLElement>('[data-ship-fields="flat"]')!;
+      const thrFields = form.querySelector<HTMLElement>('[data-ship-fields="threshold_jin"]')!;
+      const saveBtn = form.querySelector<HTMLButtonElement>('button[data-action="save-shipping"]')!;
+
+      function currentType(): "flat" | "threshold_jin" {
+        const sel = form!.querySelector<HTMLInputElement>('input[name="shipping_type"]:checked');
+        return sel?.value === "threshold_jin" ? "threshold_jin" : "flat";
+      }
+
+      // 切換模式時顯示/隱藏對應欄位。
+      function syncFields() {
+        const t = currentType();
+        flatFields.classList.toggle("hidden", t !== "flat");
+        thrFields.classList.toggle("hidden", t !== "threshold_jin");
+      }
+      form.querySelectorAll<HTMLInputElement>('input[name="shipping_type"]').forEach((r) => {
+        r.addEventListener("change", syncFields);
+      });
+      syncFields();
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const t = currentType();
+
+        let shippingConfig:
+          | { type: "flat"; fee_twd: number }
+          | { type: "threshold_jin"; free_over_fen: number; fee_twd: number };
+
+        if (t === "flat") {
+          const fee = Number(
+            form.querySelector<HTMLInputElement>('input[name="flat_fee_twd"]')!.value,
+          );
+          if (!Number.isInteger(fee) || fee < 0) {
+            showToast("運費需為 0 以上的整數。", { kind: "error" });
+            return;
+          }
+          shippingConfig = { type: "flat", fee_twd: fee };
+        } else {
+          const jin = Number(
+            form.querySelector<HTMLInputElement>('input[name="free_over_jin"]')!.value,
+          );
+          const fee = Number(
+            form.querySelector<HTMLInputElement>('input[name="threshold_fee_twd"]')!.value,
+          );
+          // 顯示用「斤」→ 儲存用 fen：斤 × 100。
+          const freeOverFen = Math.round(jin * 100);
+          if (!Number.isFinite(jin) || freeOverFen <= 0) {
+            showToast("免運門檻（斤）需大於 0。", { kind: "error" });
+            return;
+          }
+          if (!Number.isInteger(fee) || fee < 0) {
+            showToast("未滿運費需為 0 以上的整數。", { kind: "error" });
+            return;
+          }
+          shippingConfig = { type: "threshold_jin", free_over_fen: freeOverFen, fee_twd: fee };
+        }
+
+        saveBtn.disabled = true;
+        const orig = saveBtn.textContent;
+        saveBtn.textContent = "儲存中...";
+        try {
+          const { status, data, raw } = await callJson(
+            `/api/admin/seasons/${id}/shipping-config`,
+            "PATCH",
+            { shipping_config: shippingConfig },
+          );
+          if (status === 200 && data && data.ok) {
+            flashToast("已更新運費設定", { kind: "success" });
+            location.reload();
+            return;
+          }
+          const fail = data as ApiFail | null;
+          showToast(`儲存失敗：${fail?.message ?? fail?.error_code ?? raw ?? status}`, {
+            kind: "error",
+          });
+          saveBtn.disabled = false;
+          saveBtn.textContent = orig;
+        } catch {
+          showToast("網路錯誤，請稍後再試。", { kind: "error" });
+          saveBtn.disabled = false;
+          saveBtn.textContent = orig;
+        }
+      });
+    });
+
+    consumeFlash();
+  </script>
+</Layout>

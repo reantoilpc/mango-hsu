@@ -58,6 +58,8 @@ export const FALLBACK_SETTINGS: SiteSettings = {
   accepting_dry: true,
   products: FALLBACK_PRODUCTS,
   shipping_fee_twd: 150,
+  free_shipping_min_packages: 0,
+  shipping_config: { type: "flat", fee_twd: 150 },
   eta_days_after_payment: 3,
   bank_account_display: "（請洽家人提供帳號）",
   support_line_id: "@mango-hsu",

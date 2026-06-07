@@ -21,10 +21,18 @@ export interface Product {
   derived_available_count: number;
 }
 
+// V6 §5.5: mirror of src/lib/shipping.ts ShippingConfig for client-side typing.
+// Kept inline (not imported from shipping.ts) so the client bundle doesn't pull server lib.
+export type ShippingConfig =
+  | { type: "flat"; fee_twd: number }
+  | { type: "threshold_jin"; free_over_fen: number; fee_twd: number };
+
 export interface SiteSettings {
   accepting_dry: boolean;
   products: Product[];
   shipping_fee_twd: number;
+  free_shipping_min_packages: number;
+  shipping_config: ShippingConfig;
   eta_days_after_payment: number;
   bank_account_display: string;
   support_line_id: string;

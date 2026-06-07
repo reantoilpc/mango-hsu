@@ -2,7 +2,7 @@
 import Layout from "../layouts/Layout.astro";
 import { env } from "../lib/env";
 import { loadSiteSettings } from "../lib/site-settings";
-import { FREE_SHIPPING_OVER_FEN } from "../lib/shipping-fee";
+import { describeShipping } from "../lib/shipping";
 
 const settings = await loadSiteSettings(env);
 // V5.2: only show items the customer can actually buy — admin keeping it on the menu
@@ -11,7 +11,13 @@ const sellable = settings.products.filter(
   (p) => p.available && p.derived_available_count > 0,
 );
 const shipFee = settings.shipping_fee_twd;
-const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
+const shipConfig = settings.shipping_config;
+const shipDesc = describeShipping(shipConfig);
+// SSR-baked group_id → group_name so the client-side sold-out message can name the
+// flavour. The client <script> must NOT reference `settings` (a server const, not in
+// client scope) — doing so threw a ReferenceError that swallowed the sold-out message.
+const groupNameById: Record<number, string> = {};
+for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
 ---
 
 <Layout title="下訂 · 芒果許">
@@ -45,7 +51,7 @@ const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
         <>
           <h1 class="text-3xl font-bold mb-1">下訂</h1>
           <p class="text-mango-700 mb-8 text-sm">
-            滿 {freeOverJin} 斤免運，未滿每筆訂單運費 ${shipFee} 元。
+            {shipDesc}
           </p>
 
           <form
@@ -300,17 +306,51 @@ const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
       )
     }
   </section>
+
+  <script
+    is:inline
+    type="application/json"
+    id="ship-config"
+    set:html={JSON.stringify(shipConfig)}
+  />
+  <script
+    is:inline
+    type="application/json"
+    id="group-names"
+    set:html={JSON.stringify(groupNameById)}
+  />
 </Layout>
 
 <script>
   import { submitOrder, newIdempotencyKey } from "../lib/api";
   import type { OrderItem } from "../lib/types";
-  import { shippingFeeFor, totalFenOf } from "../lib/shipping-fee";
   import QRCode from "qrcode";
 
   const form = document.getElementById("order-form") as HTMLFormElement | null;
   if (form) {
     const shipFee = Number(form.dataset.shipFee ?? 150);
+    // group_id → group_name baked by SSR (see frontmatter) so the sold-out branch can
+    // name the flavour without touching the server-only `settings` const.
+    const groupNamesNode = document.getElementById("group-names");
+    const groupNameById: Record<number, string> = groupNamesNode
+      ? JSON.parse(groupNamesNode.textContent || "{}")
+      : {};
+    // V6 §5.5: shipping_config baked by SSR island so the live preview matches the server.
+    type ShipConfig =
+      | { type: "flat"; fee_twd: number }
+      | { type: "threshold_jin"; free_over_fen: number; fee_twd: number };
+    const shipCfgNode = document.getElementById("ship-config");
+    let shipCfg: ShipConfig = { type: "flat", fee_twd: shipFee };
+    try {
+      if (shipCfgNode?.textContent) shipCfg = JSON.parse(shipCfgNode.textContent) as ShipConfig;
+    } catch {
+      /* keep flat fallback */
+    }
+    function previewShipping(totalFen: number): number {
+      if (totalFen <= 0) return 0;
+      if (shipCfg.type === "flat") return shipCfg.fee_twd;
+      return totalFen >= shipCfg.free_over_fen ? 0 : shipCfg.fee_twd;
+    }
 
     const qtyInputs = form.querySelectorAll<HTMLInputElement>(".item-qty");
     const subtotalEl = document.getElementById("subtotal") as HTMLElement;
@@ -329,7 +369,7 @@ const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
       const items: OrderItem[] = [];
       let totalQty = 0;
       let subtotal = 0;
-      const fenItems: { package_fen: number; qty: number }[] = [];
+      let totalFen = 0;
       qtyInputs.forEach((el) => {
         const qty = Math.max(0, Math.floor(Number(el.value) || 0));
         if (qty > 0) {
@@ -339,16 +379,15 @@ const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
           items.push({ sku, qty });
           totalQty += qty;
           subtotal += price * qty;
-          fenItems.push({ package_fen: packageFen, qty });
+          totalFen += packageFen * qty;
         }
       });
-      return { items, totalQty, subtotal, totalFen: totalFenOf(fenItems) };
+      return { items, totalQty, subtotal, totalFen };
     }
 
     function recomputeSummary() {
       const { subtotal, totalFen } = computeItems();
-      // Same pure function as the server (src/lib/shipping-fee.ts) → preview can't drift.
-      const shipping = shippingFeeFor(totalFen, shipFee);
+      const shipping = previewShipping(totalFen);
       const total = subtotal + shipping;
       subtotalEl.textContent = `$${subtotal}`;
       shippingEl.textContent = `$${shipping}`;
@@ -410,7 +449,7 @@ const freeOverJin = FREE_SHIPPING_OVER_FEN / 100; // 1000 fen = 10 斤
         submitBtn.textContent = "送出訂單";
         const msg = res.error_code === "SOLD_OUT"
           ? (res.sold_out_group_id
-              ? `${settings.products.find((sp) => sp.group_id === res.sold_out_group_id)?.group_name ?? "選購商品"}庫存不足，請調整後重新送出。`
+              ? `${groupNameById[res.sold_out_group_id] ?? "選購商品"}庫存不足，請調整後重新送出。`
               : `品項 ${res.sku ?? ""} 剛剛售完，請調整後重新送出。`)
           : res.error_code === "unknown_product"
           ? "您選的商品已下架，請重新整理頁面。"

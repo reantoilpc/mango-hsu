@@ -1,7 +1,7 @@
 import type { AppEnv } from "../db/client";
 import type { Order, OrderItem, Product } from "../db/schema";
 import { buildLiffBindUrl } from "./line";
-import { shippingFeeFor, totalFenOf } from "./shipping-fee";
+import { computeShipping, totalFenOf, type ShippingConfig } from "./shipping";
 
 export interface OrderSuccess {
   ok: true;
@@ -45,16 +45,16 @@ export type OrderResponse = OrderSuccess | OrderError;
 
 // Relative URL so the customer's status link works regardless of which env
 // (stage / prod / future custom domain) the order was placed on. Same-origin.
-// 滿 10 斤免運、未滿收 env.SHIPPING_FEE_TWD（門檻/重量邏輯見 src/lib/shipping-fee.ts，
-// 前端 order.astro 預覽共用同一個純函式，避免前後台運費算法 drift）。
-// items must carry package_fen — callers pass the resolved-product snapshot
-// (resolveItemsForStock → resolved.resolved), not the raw customer {sku, qty}.
+// V6 (spec §5.5): shipping is computed from total order weight (Σ package_fen×qty)
+// against the active season's shipping_config (flat | threshold_jin). Callers resolve
+// items via resolveItemsForStock() FIRST (which yields package_fen per item) and parse
+// the season's shipping_config via parseShippingConfig() — this stays a pure adapter so
+// it's unit-testable and never re-queries the DB.
 export function shippingFor(
-  items: Array<{ qty: number; package_fen: number }>,
-  env: AppEnv,
+  items: Array<{ package_fen: number; qty: number }>,
+  config: ShippingConfig,
 ): number {
-  const fee = parseInt(env.SHIPPING_FEE_TWD, 10) || 150;
-  return shippingFeeFor(totalFenOf(items), fee);
+  return computeShipping(totalFenOf(items), config);
 }
 
 export function expectedMemoFor(orderId: string, name: string): string {

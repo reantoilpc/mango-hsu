@@ -1,5 +1,7 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
+import AdminForbidden from "../../../components/admin/AdminForbidden.astro";
+import AdminBreadcrumb from "../../../components/admin/AdminBreadcrumb.astro";
 import { makeDb } from "../../../db/client";
 import {
   product_groups,
@@ -12,8 +14,9 @@ import { env } from "../../../lib/env";
 
 const session = Astro.locals.session;
 if (!session) return Astro.redirect("/admin/login");
-if (session.role !== "admin") {
-  return new Response("admin only", { status: 403 });
+const forbidden = session.role !== "admin";
+if (forbidden) {
+  Astro.response.status = 403;
 }
 
 const db = makeDb(env);
@@ -86,16 +89,20 @@ function fenToJin(fen: number): string {
 }
 ---
 
+{forbidden ? (
+  <AdminForbidden reason="品種庫存只有管理員（admin）能進入。" />
+) : (
 <Layout title="庫存池管理">
   <main class="mx-auto max-w-3xl px-4 py-6 pb-12">
-    <header class="mb-6 flex items-center justify-between">
+      <AdminBreadcrumb items={[{ label: "後台首頁", href: "/admin" }, { label: "品種庫存" }]} />
+      <header class="mb-6 flex items-center justify-between">
       <h1 class="text-2xl font-bold">庫存池（進貨）</h1>
       <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
     </header>
 
     <p class="mb-4 text-sm text-gray-600">
-      V5.2：每個品種共用一個重量池（fen，1 fen = 0.01 斤）。
-      下訂時系統會自動依 SKU 的包裝大小（如半斤=50、1 斤=100）從這個池扣 fen。
+      每個品種共用一個重量池（以「斤」計，可到小數第二位）。
+      下訂時系統會自動依商品編碼的包裝大小（如半斤、1 斤）從這個池扣庫存。
       <br />
       進貨／校正請填「斤」(可用小數，例如 30 或 0.5)，正數=進貨，負數=校正/報廢。
       所有變動會記入變更紀錄。
@@ -111,6 +118,71 @@ function fenToJin(fen: number): string {
       </p>
     )}
 
+    {activeSeason && (
+      <section class="mb-6 rounded border border-emerald-200 bg-emerald-50 p-4">
+        <details data-new-group-details>
+          <summary class="cursor-pointer text-sm font-medium text-emerald-800 select-none">
+            ＋ 新增品種（群組）
+          </summary>
+          <form id="new-group-form" class="mt-3 space-y-3">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_5rem]">
+              <label class="block">
+                <span class="mb-1 block text-xs text-emerald-800">品種名稱（顯示用）</span>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  maxlength="50"
+                  aria-label="新群組品種名稱"
+                  class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                  placeholder="例：愛文芒果乾"
+                />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs text-emerald-800">品種代碼（英數小寫、連字號）</span>
+                <input
+                  type="text"
+                  name="slug"
+                  required
+                  maxlength="40"
+                  aria-label="新群組品種代碼"
+                  class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm font-mono focus-visible:outline-2 focus-visible:outline-mango-500"
+                  placeholder="例：irwin-dried"
+                />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs text-emerald-800">排序</span>
+                <input
+                  type="number"
+                  name="display_order"
+                  value="0"
+                  min="0"
+                  aria-label="新群組排序"
+                  class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                />
+              </label>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <label class="flex items-center gap-1 text-sm text-emerald-800">
+                <input type="checkbox" name="available" checked />
+                <span>立即上架</span>
+              </label>
+              <button
+                type="submit"
+                class="inline-flex items-center justify-center rounded bg-emerald-600 px-6 py-2 min-h-[44px] text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-not-allowed"
+              >
+                建立品種
+              </button>
+            </div>
+            <div
+              data-new-group-error
+              class="hidden rounded bg-red-50 px-3 py-2 text-xs text-red-800"
+            ></div>
+          </form>
+        </details>
+      </section>
+    )}
+
     <section class="space-y-4">
       {groupRows.map((g) => {
         const skus = skusByGroup.get(g.id) ?? [];
@@ -120,25 +192,103 @@ function fenToJin(fen: number): string {
             data-group-card
             data-group-id={g.id}
             data-current-fen={g.stock_fen}
+            data-group-name={g.name}
+            data-group-available={g.available ? "1" : "0"}
+            data-group-display-order={g.display_order}
           >
             <header class="mb-3 flex items-baseline justify-between">
               <div>
-                <h2 class="text-lg font-bold">{g.name}</h2>
-                <div class="font-mono text-xs text-gray-500">{g.slug}</div>
+                <div class="flex items-center gap-2">
+                  <h2 class="text-lg font-bold" data-group-name-display>{g.name}</h2>
+                  {g.available ? (
+                    <span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                      上架中
+                    </span>
+                  ) : (
+                    <span class="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
+                      已下架
+                    </span>
+                  )}
+                </div>
+                <div class="font-mono text-xs text-gray-500">品種代碼：{g.slug}</div>
               </div>
               <div class="text-right">
                 <div class="text-2xl font-bold text-mango-700" data-current-jin>
                   {fenToJin(g.stock_fen)} 斤
                 </div>
-                <div class="text-xs text-gray-500" data-current-fen-label>
-                  ({g.stock_fen} fen)
-                </div>
               </div>
             </header>
 
+            <div class="mb-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-edit-toggle
+                class="inline-flex items-center justify-center rounded border border-gray-300 px-3 py-1.5 min-h-[36px] text-xs text-gray-700 hover:bg-gray-50"
+              >
+                編輯名稱／排序
+              </button>
+              <button
+                type="button"
+                data-toggle-available
+                data-available={g.available ? "1" : "0"}
+                class="inline-flex items-center justify-center rounded border px-3 py-1.5 min-h-[36px] text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                class:list={[
+                  g.available
+                    ? "border-amber-300 text-amber-700 hover:bg-amber-50"
+                    : "border-emerald-300 text-emerald-700 hover:bg-emerald-50",
+                ]}
+              >
+                {g.available ? "下架此品種" : "重新上架"}
+              </button>
+            </div>
+
+            <form data-edit-form class="mb-3 hidden space-y-2 rounded bg-gray-50 p-3">
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_5rem]">
+                <label class="block">
+                  <span class="mb-1 block text-[11px] text-gray-600">品種名稱</span>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    maxlength="50"
+                    value={g.name}
+                    aria-label={`${g.name} 改名`}
+                    class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                  />
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-[11px] text-gray-600">排序</span>
+                  <input
+                    type="number"
+                    name="display_order"
+                    min="0"
+                    value={g.display_order}
+                    aria-label={`${g.name} 排序`}
+                    class="w-full rounded border border-gray-300 px-3 py-2 min-h-[44px] text-sm focus-visible:outline-2 focus-visible:outline-mango-500"
+                  />
+                </label>
+              </div>
+              <div class="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  data-edit-cancel
+                  class="inline-flex items-center justify-center rounded px-3 py-1.5 min-h-[36px] text-xs text-gray-600 hover:bg-gray-100"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  class="inline-flex items-center justify-center rounded bg-mango-600 px-4 py-1.5 min-h-[36px] text-xs text-white hover:bg-mango-700 disabled:bg-mango-300 disabled:cursor-not-allowed"
+                >
+                  儲存
+                </button>
+              </div>
+              <div data-edit-error class="hidden rounded bg-red-50 px-3 py-2 text-[11px] text-red-800"></div>
+            </form>
+
             {skus.length > 0 && (
               <div class="mb-3 text-xs text-gray-600">
-                包含 SKU：
+                包含商品編碼：
                 {skus.map((s, i) => (
                   <span>
                     {i > 0 && "、"}
@@ -182,14 +332,32 @@ function fenToJin(fen: number): string {
                 class="intake-error hidden sm:col-span-3 rounded bg-red-50 px-3 py-2 text-xs text-red-800"
               ></div>
             </form>
+
+            <div class="mt-3 border-t border-gray-100 pt-3">
+              <a
+                href={`/admin/products?group=${g.slug}`}
+                class="inline-flex items-center gap-1 text-xs text-mango-700 underline hover:text-mango-800"
+              >
+                ＋ 新增此品種的品項（半斤／1 斤…）
+              </a>
+              {(skusByGroup.get(g.id) ?? []).length === 0 && (
+                <span class="ml-2 text-[11px] text-gray-400">此品種尚無品項</span>
+              )}
+            </div>
           </article>
         );
       })}
 
       {groupRows.length === 0 && activeSeason && (
-        <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-          當季尚無品種。請先到「商品管理」建立 SKU（會自動建立 group）。
-        </p>
+        <div class="rounded border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
+          <p class="mb-2 font-medium">當季還沒有任何品種</p>
+          <p class="mb-4 text-gray-500">
+            建立年度芒果販賣的三步驟：
+            <br />① 在上方「＋ 新增品種」建立品種（如金煌芒果乾）
+            <br />② 在品種卡片填「斤數」進貨
+            <br />③ 進貨後到品種卡的「新增此品種的品項」建立各包裝商品編碼（半斤／1 斤…）
+          </p>
+        </div>
       )}
     </section>
 
@@ -353,6 +521,248 @@ function fenToJin(fen: number): string {
       });
     });
 
+    // ============ Create new product_group (V6 P6 §5.2) ============
+    interface GroupCreateOk {
+      ok: true;
+      group_id: number;
+      slug: string;
+    }
+    interface GroupCreateFail {
+      ok: false;
+      error_code: string;
+      message?: string;
+      slug?: string;
+    }
+
+    const newGroupForm = document.getElementById("new-group-form") as HTMLFormElement | null;
+    if (newGroupForm) {
+      const ngErr = newGroupForm.querySelector<HTMLElement>("[data-new-group-error]")!;
+      const ngBtn = newGroupForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+
+      function ngShowErr(msg: string): void {
+        ngErr.textContent = msg;
+        ngErr.classList.remove("hidden");
+      }
+      function ngClearErr(): void {
+        ngErr.textContent = "";
+        ngErr.classList.add("hidden");
+      }
+
+      newGroupForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        ngClearErr();
+
+        const fd = new FormData(newGroupForm);
+        const name = String(fd.get("name") ?? "").trim();
+        const slug = String(fd.get("slug") ?? "").trim();
+        const displayOrder = Number(fd.get("display_order") ?? 0);
+        const available = fd.get("available") === "on";
+
+        if (!name) {
+          ngShowErr("請填品種名稱");
+          return;
+        }
+        if (!/^[a-z0-9-]+$/.test(slug)) {
+          ngShowErr("品種代碼只能小寫英數與連字號（例：irwin-dried）");
+          return;
+        }
+
+        ngBtn.disabled = true;
+        const original = ngBtn.textContent;
+        ngBtn.textContent = "建立中...";
+
+        try {
+          const res = await fetch("/api/admin/product-groups/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              name,
+              slug,
+              display_order: Number.isFinite(displayOrder) ? displayOrder : 0,
+              available,
+            }),
+          });
+
+          const ct = res.headers.get("content-type") ?? "";
+          if (!ct.includes("application/json")) {
+            ngShowErr(`伺服器回應異常 (${res.status})：${await res.text()}`);
+            ngBtn.disabled = false;
+            ngBtn.textContent = original;
+            return;
+          }
+
+          const data = (await res.json()) as GroupCreateOk | GroupCreateFail;
+          if (res.ok && "ok" in data && data.ok) {
+            flashToast(`已新增品種：${name}`, { kind: "success" });
+            location.reload();
+            return;
+          }
+
+          const fail = data as GroupCreateFail;
+          if (fail.error_code === "SLUG_TAKEN") {
+            ngShowErr(`品種代碼「${fail.slug ?? slug}」當季已存在，請換一個。`);
+          } else if (fail.error_code === "NO_ACTIVE_SEASON") {
+            ngShowErr("目前沒有啟用中的年度季節，請先到「年度設定」啟用當季。");
+          } else {
+            ngShowErr(`新增失敗 (${fail.error_code})：${fail.message ?? "?"}`);
+          }
+          ngBtn.disabled = false;
+          ngBtn.textContent = original;
+        } catch {
+          ngShowErr("網路錯誤，請稍後再試。");
+          ngBtn.disabled = false;
+          ngBtn.textContent = original;
+        }
+      });
+    }
+
+    // ============ Edit / toggle-available per group (V6 P6 §5.2) ============
+    interface GroupUpdateOk {
+      ok: true;
+      group_id: number;
+      changed: string[];
+    }
+    interface GroupUpdateFail {
+      ok: false;
+      error_code: string;
+      message?: string;
+      current?: { name: string; available: boolean; display_order: number };
+    }
+
+    async function patchGroup(
+      groupId: number,
+      payload: {
+        name?: string;
+        available?: boolean;
+        display_order?: number;
+        expected: { name: string; available: boolean; display_order: number };
+      },
+    ): Promise<{ res: Response; data: GroupUpdateOk | GroupUpdateFail | null }> {
+      const res = await fetch(`/api/admin/product-groups/${groupId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      const ct = res.headers.get("content-type") ?? "";
+      const data = ct.includes("application/json")
+        ? ((await res.json()) as GroupUpdateOk | GroupUpdateFail)
+        : null;
+      return { res, data };
+    }
+
+    document.querySelectorAll<HTMLElement>("[data-group-card]").forEach((card) => {
+      const groupId = Number(card.dataset.groupId);
+      const expected = {
+        name: card.dataset.groupName ?? "",
+        available: card.dataset.groupAvailable === "1",
+        display_order: Number(card.dataset.groupDisplayOrder ?? 0),
+      };
+
+      // --- inline edit (name / display_order) ---
+      const editToggle = card.querySelector<HTMLButtonElement>("[data-edit-toggle]");
+      const editForm = card.querySelector<HTMLFormElement>("[data-edit-form]");
+      const editCancel = card.querySelector<HTMLButtonElement>("[data-edit-cancel]");
+      const editErr = card.querySelector<HTMLElement>("[data-edit-error]");
+
+      function editShowErr(msg: string): void {
+        if (!editErr) return;
+        editErr.textContent = msg;
+        editErr.classList.remove("hidden");
+      }
+      function editClearErr(): void {
+        if (!editErr) return;
+        editErr.textContent = "";
+        editErr.classList.add("hidden");
+      }
+
+      editToggle?.addEventListener("click", () => {
+        editForm?.classList.toggle("hidden");
+        editClearErr();
+      });
+      editCancel?.addEventListener("click", () => {
+        editForm?.classList.add("hidden");
+        editClearErr();
+      });
+
+      editForm?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        editClearErr();
+        const fd = new FormData(editForm);
+        const name = String(fd.get("name") ?? "").trim();
+        const displayOrder = Number(fd.get("display_order") ?? 0);
+        if (!name) {
+          editShowErr("請填品種名稱");
+          return;
+        }
+        const submitBtn = editForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        submitBtn.disabled = true;
+        const original = submitBtn.textContent;
+        submitBtn.textContent = "儲存中...";
+        try {
+          const { res, data } = await patchGroup(groupId, {
+            name,
+            display_order: Number.isFinite(displayOrder) ? displayOrder : 0,
+            expected,
+          });
+          if (res.ok && data && "ok" in data && data.ok) {
+            flashToast(`已更新「${name}」`, { kind: "success" });
+            location.reload();
+            return;
+          }
+          const fail = data as GroupUpdateFail | null;
+          if (fail?.error_code === "STALE_STATE") {
+            editShowErr("此品種在你載入後被其他人改過，請重新整理頁面再試。");
+          } else {
+            editShowErr(`儲存失敗 (${fail?.error_code ?? res.status})：${fail?.message ?? "?"}`);
+          }
+          submitBtn.disabled = false;
+          submitBtn.textContent = original;
+        } catch {
+          editShowErr("網路錯誤，請稍後再試。");
+          submitBtn.disabled = false;
+          submitBtn.textContent = original;
+        }
+      });
+
+      // --- toggle available (上架/下架) ---
+      const toggleBtn = card.querySelector<HTMLButtonElement>("[data-toggle-available]");
+      toggleBtn?.addEventListener("click", async () => {
+        const currentlyAvailable = toggleBtn.dataset.available === "1";
+        const next = !currentlyAvailable;
+        if (!confirm(next ? `確定要重新上架「${expected.name}」？` : `確定要下架「${expected.name}」？下架後顧客端不會看到此品種。`)) {
+          return;
+        }
+        toggleBtn.disabled = true;
+        const original = toggleBtn.textContent;
+        toggleBtn.textContent = "處理中...";
+        try {
+          const { res, data } = await patchGroup(groupId, { available: next, expected });
+          if (res.ok && data && "ok" in data && data.ok) {
+            flashToast(next ? `已重新上架「${expected.name}」` : `已下架「${expected.name}」`, {
+              kind: "success",
+            });
+            location.reload();
+            return;
+          }
+          const fail = data as GroupUpdateFail | null;
+          if (fail?.error_code === "STALE_STATE") {
+            showToast("此品種在你載入後被其他人改過，請重新整理後再試。", { kind: "error" });
+          } else {
+            showToast(`操作失敗 (${fail?.error_code ?? res.status})`, { kind: "error" });
+          }
+          toggleBtn.disabled = false;
+          toggleBtn.textContent = original;
+        } catch {
+          showToast("網路錯誤，請稍後再試。", { kind: "error" });
+          toggleBtn.disabled = false;
+          toggleBtn.textContent = original;
+        }
+      });
+    });
+
     consumeFlash();
   </script>
 </Layout>
+)}

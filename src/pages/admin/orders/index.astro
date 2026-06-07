@@ -1,5 +1,7 @@
 ---
 import Layout from "../../../layouts/Layout.astro";
+import Modal from "../../../components/admin/Modal.astro";
+import AdminBreadcrumb from "../../../components/admin/AdminBreadcrumb.astro";
 import { makeDb } from "../../../db/client";
 import { orders, order_items, products } from "../../../db/schema";
 import { eq, and, desc, gte, lte, inArray, isNotNull } from "drizzle-orm";
@@ -80,6 +82,7 @@ const filterLabels: Record<string, string> = {
 
 <Layout>
   <main class="mx-auto max-w-5xl px-4 py-6">
+    <AdminBreadcrumb items={[{ label: "後台首頁", href: "/admin" }, { label: "訂單" }]} />
     <header class="mb-6 flex items-center justify-between">
       <h1 class="text-2xl font-bold">訂單列表</h1>
       <div class="flex items-center gap-3">
@@ -115,13 +118,17 @@ const filterLabels: Record<string, string> = {
       method="POST"
       class="rounded border border-gray-200"
     >
-      <div class="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3">
+      <div
+        id="batch-bar"
+        data-batch-bar
+        class="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3 transition-colors"
+      >
         <label class="text-sm">
           <input type="checkbox" id="select-all" class="mr-1" />
           全選
         </label>
-        <span class="ml-auto text-sm text-gray-600">
-          選 <span id="selected-count">0</span> 筆
+        <span id="selected-label" class="ml-auto text-sm font-medium text-gray-500">
+          未選取
         </span>
         <button
           type="button"
@@ -129,7 +136,7 @@ const filterLabels: Record<string, string> = {
           disabled
           class="rounded bg-orange-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
-          一鍵生揀貨單
+          生成揀貨單
         </button>
         <button
           type="button"
@@ -137,13 +144,13 @@ const filterLabels: Record<string, string> = {
           disabled
           class="rounded border border-gray-300 px-4 py-2 text-sm disabled:opacity-40"
         >
-          批次標已出貨
+          批次標為已出貨
         </button>
       </div>
 
       <ul class="divide-y divide-gray-200">
         {decorated.map(({ order, summary }) => (
-          <li class="flex flex-wrap items-center gap-3 px-4 py-3">
+          <li class="order-row flex flex-wrap items-center gap-3 px-4 py-3 transition-colors">
             <input
               type="checkbox"
               class="row-checkbox h-5 w-5"
@@ -200,16 +207,35 @@ const filterLabels: Record<string, string> = {
     </form>
   </main>
 
+  <Modal
+    id="bulk-ship-modal"
+    title="批次標為已出貨"
+    confirmLabel="確認標記"
+  >
+    <p class="mb-2">以下 <span id="bulk-ship-count" class="font-semibold">0</span> 筆訂單將標為已出貨：</p>
+    <ul id="bulk-ship-list" class="max-h-48 overflow-y-auto rounded border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-6"></ul>
+  </Modal>
+
   <script>
+    import { flashToast, consumeFlash } from "../../../lib/toast";
     const form = document.getElementById("batch-form") as HTMLFormElement;
     const selectAll = document.getElementById("select-all") as HTMLInputElement;
     const rowCheckboxes = () =>
       Array.from(form.querySelectorAll<HTMLInputElement>(".row-checkbox"));
-    const selectedCountEl = document.getElementById("selected-count")!;
+    const selectedLabelEl = document.getElementById("selected-label")!;
+    const batchBarEl = document.getElementById("batch-bar")!;
     const gotoPickBtn = document.getElementById("goto-pick") as HTMLButtonElement;
     const bulkShipBtn = document.getElementById(
       "bulk-mark-shipped",
     ) as HTMLButtonElement;
+
+    // Highlight a row's <li> whenever its checkbox flips.
+    function paintRow(cb: HTMLInputElement): void {
+      const li = cb.closest("li");
+      if (!li) return;
+      li.classList.toggle("row-selected", cb.checked);
+      li.classList.toggle("bg-mango-50", cb.checked);
+    }
 
     function checked() {
       return rowCheckboxes().filter((c) => c.checked);
@@ -217,23 +243,44 @@ const filterLabels: Record<string, string> = {
 
     function refresh() {
       const sel = checked();
-      selectedCountEl.textContent = String(sel.length);
-      gotoPickBtn.disabled = sel.length === 0;
+      const n = sel.length;
+      // §5.8: "✓ 已選 N 筆" when any selected; muted "未選取" at zero.
+      if (n > 0) {
+        selectedLabelEl.textContent = `✓ 已選 ${n} 筆`;
+        selectedLabelEl.classList.remove("text-gray-500");
+        selectedLabelEl.classList.add("text-mango-700");
+        batchBarEl.classList.remove("bg-gray-50");
+        batchBarEl.classList.add("bg-mango-50", "ring-1", "ring-mango-300");
+      } else {
+        selectedLabelEl.textContent = "未選取";
+        selectedLabelEl.classList.add("text-gray-500");
+        selectedLabelEl.classList.remove("text-mango-700");
+        batchBarEl.classList.add("bg-gray-50");
+        batchBarEl.classList.remove("bg-mango-50", "ring-1", "ring-mango-300");
+      }
+      gotoPickBtn.disabled = n === 0;
       // Bulk-mark-shipped only on paid + un-shipped rows
       bulkShipBtn.disabled =
-        sel.length === 0 ||
+        n === 0 ||
         sel.some(
           (c) => c.dataset.paid !== "1" || c.dataset.shipped === "1",
         );
     }
 
     selectAll.addEventListener("change", () => {
-      rowCheckboxes().forEach((c) => (c.checked = selectAll.checked));
+      rowCheckboxes().forEach((c) => {
+        c.checked = selectAll.checked;
+        paintRow(c);
+      });
       refresh();
     });
 
     form.addEventListener("change", (e) => {
-      if ((e.target as HTMLElement).classList.contains("row-checkbox")) refresh();
+      const t = e.target as HTMLElement;
+      if (t.classList.contains("row-checkbox")) {
+        paintRow(t as HTMLInputElement);
+        refresh();
+      }
     });
 
     gotoPickBtn.addEventListener("click", () => {
@@ -244,17 +291,52 @@ const filterLabels: Record<string, string> = {
       window.location.href = `/admin/batches/new?ids=${encodeURIComponent(ids)}`;
     });
 
-    bulkShipBtn.addEventListener("click", async () => {
-      const ids = checked().map((c) => c.value);
-      if (!ids.length) return;
-      if (!confirm(`確定把 ${ids.length} 筆訂單標為已出貨？`)) return;
+    const bulkShipDlg = document.getElementById("bulk-ship-modal") as HTMLDialogElement | null;
+    const bulkShipCountEl = document.getElementById("bulk-ship-count");
+    const bulkShipListEl = document.getElementById("bulk-ship-list");
+
+    async function performBulkShip(ids: string[]): Promise<void> {
       const res = await fetch("/api/admin/orders/bulk-mark-shipped", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ ids }),
       });
-      if (res.ok) location.reload();
-      else alert("失敗：" + (await res.text()));
+      if (res.ok) {
+        // §5.8: concrete success message survives the reload via flashToast.
+        flashToast(`已標 ${ids.length} 筆為已出貨`, { kind: "success" });
+        location.reload();
+      } else {
+        flashToast(`批次標出貨失敗：${await res.text()}`, { kind: "error" });
+        location.reload();
+      }
+    }
+
+    bulkShipBtn.addEventListener("click", () => {
+      const ids = checked().map((c) => c.value);
+      if (!ids.length) return;
+      // §5.8: confirm dialog lists every order id so the shopkeeper can verify.
+      if (bulkShipCountEl) bulkShipCountEl.textContent = String(ids.length);
+      if (bulkShipListEl) {
+        bulkShipListEl.innerHTML = "";
+        for (const id of ids) {
+          const li = document.createElement("li");
+          li.textContent = id;
+          bulkShipListEl.appendChild(li);
+        }
+      }
+      bulkShipDlg?.showModal();
     });
+
+    bulkShipDlg
+      ?.querySelector("[data-modal-confirm]")
+      ?.addEventListener("click", () => {
+        const ids = checked().map((c) => c.value);
+        bulkShipDlg.close();
+        if (ids.length) performBulkShip(ids);
+      });
+
+    // Show any toast queued by a previous reload (bulk-ship result).
+    consumeFlash();
   </script>
 </Layout>

@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 // Time convention:
 // - All timestamp columns store UTC ISO-8601 with 'Z' suffix (e.g. "2026-04-26T14:38:27.123Z").
@@ -29,6 +30,13 @@ export const seasons = sqliteTable("seasons", {
   ended_at: text("ended_at"),
   cloned_from_season_id: integer("cloned_from_season_id").references((): any => seasons.id),
   created_at: text("created_at").notNull(), // UTC ISO + Z
+  // V6 §4.1: per-season shipping rule, JSON string.
+  //   {"type":"flat","fee_twd":150}  (default — back-compat with the old flat $150 fee)
+  //   {"type":"threshold_jin","free_over_fen":1000,"fee_twd":150}  (free over N 斤; free_over_fen in fen, 1斤=100fen)
+  // DB column carries a literal-string DEFAULT so pre-existing rows read as flat $150.
+  shipping_config: text("shipping_config")
+    .notNull()
+    .default('{"type":"flat","fee_twd":150}'),
 });
 
 export const product_groups = sqliteTable(
@@ -73,15 +81,28 @@ export const products = sqliteTable(
   }),
 );
 
-export const admin_users = sqliteTable("admin_users", {
-  email: text("email").primaryKey(),
-  password_hash: text("password_hash").notNull(), // "pbkdf2$<iters>$<base64-salt>$<base64-hash>"
-  role: text("role", { enum: ["admin", "operator"] }).notNull(),
-  must_change_password: integer("must_change_password", { mode: "boolean" })
-    .notNull()
-    .default(true),
-  created_at: text("created_at").notNull(),
-});
+export const admin_users = sqliteTable(
+  "admin_users",
+  {
+    email: text("email").primaryKey(),
+    password_hash: text("password_hash").notNull(), // "pbkdf2$<iters>$<base64-salt>$<base64-hash>"
+    role: text("role", { enum: ["admin", "operator"] }).notNull(),
+    must_change_password: integer("must_change_password", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    created_at: text("created_at").notNull(),
+    // V6 §4.2: Telegram-channel forgot-password. Both nullable; cleared after a successful reset.
+    reset_token: text("reset_token"), // single-use opaque token (crypto.getRandomValues)
+    reset_token_expires_at: text("reset_token_expires_at"), // UTC ISO-8601 + Z; 30-min TTL set by the request-reset endpoint
+  },
+  (t) => ({
+    // Partial unique index: many NULLs allowed, but a non-null reset_token must be unique.
+    // Same partial-index pattern as seasons_active_singleton (D1 SQLite parser support verified).
+    uqResetToken: uniqueIndex("admin_users_reset_token_unique")
+      .on(t.reset_token)
+      .where(sql`${t.reset_token} IS NOT NULL`),
+  }),
+);
 
 export const orders = sqliteTable(
   "orders",

@@ -5,6 +5,7 @@ import { makeDb } from "../../../db/client";
 import { orders, order_items, seasons } from "../../../db/schema";
 import { nextOrderId } from "../../../lib/order-id";
 import { expectedMemoFor, shippingFor } from "../../../lib/order-response";
+import { parseShippingConfig } from "../../../lib/shipping";
 import { validateAdminOrder } from "../../../lib/order-validate";
 import { isUniqueOnIdempotency, isUniqueOnOrderId } from "../../../lib/order-errors";
 import {
@@ -78,12 +79,21 @@ export const POST: APIRoute = async ({ request, locals: _locals }) => {
     return json({ ok: false, error_code: "SOLD_OUT", sku: resolved.sku }, 409);
   }
 
-  // 3) Compute totals from resolved snapshot.
+  // 3) Look up active season (id + shipping_config) ONCE.
+  const seasonRow = await db
+    .select({ id: seasons.id, shipping_config: seasons.shipping_config })
+    .from(seasons)
+    .where(eq(seasons.status, "active"))
+    .limit(1);
+  const seasonId = seasonRow[0]?.id ?? null;
+  const shippingConfig = parseShippingConfig(seasonRow[0]?.shipping_config ?? null);
+
+  // 4) Compute totals from resolved snapshot.
   let subtotal = 0;
   for (const r of resolved.resolved) {
     subtotal += r.price * r.qty;
   }
-  const shipping = shippingFor(resolved.resolved, env);
+  const shipping = shippingFor(resolved.resolved, shippingConfig);
   const total = subtotal + shipping;
 
   // 4) Read group stock_fen BEFORE the CAS for audit before/after.
@@ -98,14 +108,6 @@ export const POST: APIRoute = async ({ request, locals: _locals }) => {
       409,
     );
   }
-
-  // 6) Look up active season id.
-  const seasonRow = await db
-    .select({ id: seasons.id })
-    .from(seasons)
-    .where(eq(seasons.status, "active"))
-    .limit(1);
-  const seasonId = seasonRow[0]?.id ?? null;
 
   // 7) Insert with race-aware order_id retry (max 3).
   for (let attempt = 0; attempt < 3; attempt++) {

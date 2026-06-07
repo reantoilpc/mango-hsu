@@ -1,9 +1,10 @@
 ---
 import Layout from "../../layouts/Layout.astro";
 import { makeDb } from "../../db/client";
-import { orders } from "../../db/schema";
-import { sql, desc, eq, and } from "drizzle-orm";
+import { orders, seasons, product_groups } from "../../db/schema";
+import { sql, desc, eq, asc } from "drizzle-orm";
 import { activeOrdersFilter } from "../../lib/orders-query";
+import { groupStockSummary } from "../../lib/admin-dashboard";
 import { env } from "../../lib/env";
 
 
@@ -37,6 +38,28 @@ const recent = await db
   .where(activeOrdersFilter)
   .orderBy(desc(orders.created_at))
   .limit(5);
+
+// V6 §5.7 dashboard: active season + per-group remaining stock.
+const activeSeasonRows = await db
+  .select()
+  .from(seasons)
+  .where(eq(seasons.status, "active"))
+  .limit(1);
+const activeSeason = activeSeasonRows[0] ?? null;
+
+const groupRows = activeSeason
+  ? await db
+      .select({
+        id: product_groups.id,
+        name: product_groups.name,
+        stock_fen: product_groups.stock_fen,
+      })
+      .from(product_groups)
+      .where(eq(product_groups.season_id, activeSeason.id))
+      .orderBy(asc(product_groups.display_order), asc(product_groups.slug))
+  : [];
+
+const stockSummary = groupStockSummary(groupRows);
 ---
 
 <Layout>
@@ -62,6 +85,64 @@ const recent = await db
         <div class="mt-1 text-3xl font-bold text-orange-600">{pendingShip}</div>
       </div>
     </div>
+
+    {/* V6 §5.7 — current season banner */}
+    {activeSeason ? (
+      <p class="mb-6 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        當季：<strong>{activeSeason.name}</strong>（{activeSeason.code}）
+      </p>
+    ) : (
+      <p class="mb-6 rounded bg-red-50 px-3 py-2 text-sm text-red-800">
+        尚未設定當季年度。請先到「年度設定」建立並啟用一個年度。
+        {session.role === "admin" && (
+          <a href="/admin/seasons" class="ml-1 underline">前往年度設定 →</a>
+        )}
+      </p>
+    )}
+
+    {/* V6 §5.7 — per-flavour remaining stock (low = red) */}
+    {activeSeason && (
+      <section class="mb-8" aria-label="各品種剩餘庫存">
+        <div class="mb-2 flex items-baseline justify-between">
+          <h2 class="text-lg font-bold">各品種剩餘庫存</h2>
+          {session.role === "admin" && (
+            <a href="/admin/product-groups" class="text-sm text-mango-700 underline">進貨／校正 →</a>
+          )}
+        </div>
+        {stockSummary.length > 0 ? (
+          <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2" data-stock-summary>
+            {stockSummary.map((g) => (
+              <li
+                class:list={[
+                  "rounded border p-4 flex items-baseline justify-between",
+                  g.low ? "border-red-300 bg-red-50" : "border-gray-200",
+                ]}
+                data-group-id={g.id}
+              >
+                <span class="font-medium">{g.name}</span>
+                <span class="text-right">
+                  <span class:list={["text-2xl font-bold", g.low ? "text-red-600" : "text-mango-700"]}>
+                    {g.jin} 斤
+                  </span>
+                  {g.soldOut ? (
+                    <span class="ml-2 rounded bg-red-600 px-2 py-0.5 text-xs text-white">售完</span>
+                  ) : g.low ? (
+                    <span class="ml-2 rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">低量</span>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+            當季尚無品種。
+            {session.role === "admin" && (
+              <a href="/admin/products" class="ml-1 text-mango-700 underline">先到「商品」建立 SKU →</a>
+            )}
+          </p>
+        )}
+      </section>
+    )}
 
     <h2 class="mb-3 text-lg font-bold">最近訂單</h2>
     <ul class="divide-y divide-gray-200 rounded border border-gray-200">
@@ -98,6 +179,12 @@ const recent = await db
       </a>
       {session.role === "admin" && (
         <>
+          <a
+            href="/admin/seasons"
+            class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"
+          >
+            年度設定
+          </a>
           <a
             href="/admin/products"
             class="rounded border border-gray-300 px-4 py-2 hover:bg-gray-50"

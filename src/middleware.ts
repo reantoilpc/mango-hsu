@@ -30,9 +30,18 @@ function applySecurityHeaders(response: Response): Response {
 export const onRequest = defineMiddleware(async (ctx, next) => {
   const url = new URL(ctx.request.url);
   const isAdmin = url.pathname.startsWith("/admin");
-  const isLogin = url.pathname === "/admin/login";
+  // Logged-out-reachable admin pages: login + the forgot/reset-password flow (V6 §5.6).
+  // A user who forgot their password has no session, so these must bypass the auth gate.
+  // Exact-match only (no startsWith) so nothing else under /admin/ is accidentally exposed.
+  const PUBLIC_ADMIN_PATHS = new Set([
+    "/admin/login",
+    "/admin/forgot-password",
+    "/admin/reset-password",
+  ]);
 
-  if (!isAdmin || isLogin) return applySecurityHeaders(await next());
+  if (!isAdmin || PUBLIC_ADMIN_PATHS.has(url.pathname)) {
+    return applySecurityHeaders(await next());
+  }
 
   const token = ctx.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return applySecurityHeaders(ctx.redirect("/admin/login"));

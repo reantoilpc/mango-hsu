@@ -343,3 +343,123 @@ export function cleanupTestAdmin() {
 export function skipIfNoIntegration(): boolean {
   return !STAGE_URL || !TEST_TOKEN;
 }
+
+// --- V6 §5.6 forgot-password test helpers ---
+
+// Seed an admin_users row whose email is a test-prefixed address ('%@local' so cleanupTestAdmin
+// removes it) with a REAL pbkdf2 hash for `password`. Used by reset tests that must verify
+// login works with the NEW password after a successful reset. password_hash is computed locally
+// via the same auth helper the app uses.
+import { hashPassword } from "../src/lib/auth";
+
+export async function seedAdminUser(opts: {
+  email: string;
+  password: string;
+  role?: "admin" | "operator";
+}): Promise<void> {
+  if (!opts.email.endsWith("@local")) {
+    throw new Error(`seedAdminUser: email must end with "@local" (got "${opts.email}")`);
+  }
+  const hash = await hashPassword(opts.password);
+  const role = opts.role ?? "admin";
+  const now = new Date().toISOString();
+  d1Execute(
+    `INSERT OR REPLACE INTO admin_users (email, password_hash, role, must_change_password, created_at)
+     VALUES ('${opts.email}', '${hash}', '${role}', 0, '${now}')`,
+  );
+}
+
+// Read the stored reset_token (hash) + expiry for an admin. Returns nulls if unset.
+export function getResetTokenRow(email: string): {
+  reset_token: string | null;
+  reset_token_expires_at: string | null;
+} {
+  const rows = d1Execute(
+    `SELECT reset_token, reset_token_expires_at FROM admin_users WHERE email = '${email}'`,
+  ) as Array<{ reset_token: string | null; reset_token_expires_at: string | null }>;
+  if (rows.length === 0) throw new Error(`getResetTokenRow: no admin ${email}`);
+  return rows[0]!;
+}
+
+// Directly set an admin's reset_token (hash) + expiry — lets reset-submit tests install a known
+// token (and an EXPIRED one) without going through request-reset (which would push Telegram).
+export function setResetToken(
+  email: string,
+  tokenHash: string | null,
+  expiresAt: string | null,
+): void {
+  const tk = tokenHash === null ? "NULL" : `'${tokenHash}'`;
+  const ex = expiresAt === null ? "NULL" : `'${expiresAt}'`;
+  d1Execute(
+    `UPDATE admin_users SET reset_token = ${tk}, reset_token_expires_at = ${ex} WHERE email = '${email}'`,
+  );
+}
+
+// Read an admin's current password_hash (to assert it CHANGED after a reset).
+export function getAdminPasswordHash(email: string): string {
+  const rows = d1Execute(
+    `SELECT password_hash FROM admin_users WHERE email = '${email}'`,
+  ) as Array<{ password_hash: string }>;
+  if (rows.length === 0) throw new Error(`getAdminPasswordHash: no admin ${email}`);
+  return rows[0]!.password_hash;
+}
+
+// Count live sessions for an admin (to assert reset wiped them).
+export function countSessions(email: string): number {
+  const rows = d1Execute(
+    `SELECT COUNT(*) AS n FROM sessions WHERE user_email = '${email}'`,
+  ) as Array<{ n: number }>;
+  return rows[0]!.n;
+}
+
+// Insert a session row for an admin (to assert reset deletes it). Token is test-prefixed.
+export function seedSessionFor(email: string): string {
+  const token = `test-sess-${crypto.randomUUID()}`;
+  const expires = new Date(Date.now() + 3600_000).toISOString();
+  d1Execute(
+    `INSERT INTO sessions (token, user_email, expires_at) VALUES ('${token}', '${email}', '${expires}')`,
+  );
+  return token;
+}
+
+// Wipe rl:reset:* KV keys between reset tests (1-hour TTL is far slower than test traffic; the
+// 3/hr/email limit would otherwise carry across test cases). Mirrors clearOrderRateLimit.
+export function clearResetRateLimit() {
+  const list = spawnSync(
+    "bunx",
+    [
+      "wrangler",
+      "kv",
+      "key",
+      "list",
+      "--binding=RATELIMIT",
+      "--env=stage",
+      "--remote",
+      "--prefix=rl:reset:",
+    ],
+    { encoding: "utf-8" },
+  );
+  if (list.status !== 0) return;
+  let keys: Array<{ name: string }>;
+  try {
+    keys = JSON.parse(list.stdout);
+  } catch {
+    return;
+  }
+  for (const { name } of keys) {
+    spawnSync(
+      "bunx",
+      [
+        "wrangler",
+        "kv",
+        "key",
+        "delete",
+        name,
+        "--binding=RATELIMIT",
+        "--env=stage",
+        "--remote",
+      ],
+      { encoding: "utf-8" },
+    );
+  }
+}

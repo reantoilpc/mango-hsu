@@ -10,6 +10,7 @@ import {
   shippingFor,
   type OrderResponse,
 } from "../../lib/order-response";
+import { parseShippingConfig } from "../../lib/shipping";
 import { validateCustomerOrder } from "../../lib/order-validate";
 import { isUniqueOnIdempotency, isUniqueOnOrderId } from "../../lib/order-errors";
 import {
@@ -117,13 +118,23 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     return json({ ok: false, error_code: "SOLD_OUT", sku: resolved.sku });
   }
 
-  // 4) Compute totals from resolved snapshot (price taken at this moment).
+  // 4) Look up active season (id + shipping_config) ONCE — used for both the
+  //    season_id stamp on the order and the V6 shipping computation.
+  const seasonRow = await db
+    .select({ id: seasons.id, shipping_config: seasons.shipping_config })
+    .from(seasons)
+    .where(eq(seasons.status, "active"))
+    .limit(1);
+  const seasonId = seasonRow[0]?.id ?? null;
+  const shippingConfig = parseShippingConfig(seasonRow[0]?.shipping_config ?? null);
+
+  // 5) Compute totals from resolved snapshot (price taken at this moment).
+  //    Shipping uses resolved items' package_fen (Σ package_fen×qty) + the season config.
   let subtotal = 0;
   for (const r of resolved.resolved) {
     subtotal += r.price * r.qty;
   }
-  // resolved.resolved carries package_fen → shippingFor computes 斤 for the free-shipping threshold.
-  const shipping = shippingFor(resolved.resolved, env);
+  const shipping = shippingFor(resolved.resolved, shippingConfig);
   const total = subtotal + shipping;
 
   // 5) Read group stock_fen BEFORE the CAS so we can write before/after into audit_log.
@@ -143,15 +154,6 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
       sold_out_group_id: reserve.sold_out_group_id,
     });
   }
-
-  // 7) Look up active season id (orders.season_id is FK; defaulted at DB level for
-  // migration safety but we set it explicitly here).
-  const seasonRow = await db
-    .select({ id: seasons.id })
-    .from(seasons)
-    .where(eq(seasons.status, "active"))
-    .limit(1);
-  const seasonId = seasonRow[0]?.id ?? null;
 
   // 8) Insert with race-aware order_id retry (max 3 attempts).
   for (let attempt = 0; attempt < 3; attempt++) {
