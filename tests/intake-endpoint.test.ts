@@ -265,7 +265,7 @@ describe("V5.2 PR2 /product-groups/:id/intake", () => {
     expect(res.status).toBe(401);
   });
 
-  it("csrf: missing Origin returns 403", async () => {
+  it("csrf: foreign Origin returns 403", async () => {
     if (SKIP) return;
     seedScenario(100);
     const cookie = createTestAdminSession();
@@ -273,7 +273,7 @@ describe("V5.2 PR2 /product-groups/:id/intake", () => {
       cookie,
       testGroupId,
       { delta_fen: 100, reason: "test" },
-      { origin: null },
+      { origin: "https://evil.example.com" },
     );
     expect(res.status).toBe(403);
   });
