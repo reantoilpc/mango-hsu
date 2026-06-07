@@ -459,6 +459,13 @@ function fenToJin(fen: number): string {
 
         const expectedFen = Number(card.dataset.currentFen);
 
+        // Mint the idempotency key ONCE per logical intake and cache it on the
+        // card. A retry after a lost response must reuse the same key so the
+        // server replay can dedupe the double intake — minting a fresh UUID
+        // inside the fetch body on every submit would defeat that entirely.
+        // Cleared only on a CONFIRMED success (just before the reload below).
+        const key = (card.dataset.intakeKey ??= crypto.randomUUID());
+
         submitBtn.disabled = true;
         const originalLabel = submitBtn.textContent;
         submitBtn.textContent = "處理中...";
@@ -474,7 +481,7 @@ function fenToJin(fen: number): string {
                 delta_fen: deltaFen,
                 expected_pool_fen: expectedFen,
                 reason,
-                idempotency_key: crypto.randomUUID(),
+                idempotency_key: key,
               }),
             },
           );
@@ -495,6 +502,9 @@ function fenToJin(fen: number): string {
                 : `已記錄：${(deltaFen / 100).toFixed(2)} 斤，新池 ${(data.new_pool_fen / 100).toFixed(2)} 斤`,
               { kind: "success" },
             );
+            // Confirmed success — drop the cached key so the next intake on this
+            // card starts a fresh idempotency window.
+            delete card.dataset.intakeKey;
             location.reload();
             return;
           }

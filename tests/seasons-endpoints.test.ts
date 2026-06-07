@@ -64,13 +64,16 @@ async function patchSeason(
   id: number,
   action: "activate" | "archive",
   body: Record<string, unknown> = {},
-  opts: { origin?: boolean } = {},
+  opts: { origin?: boolean; originUrl?: string } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Cookie: cookie,
   };
-  if (opts.origin !== false) headers.Origin = STAGE_URL;
+  // originUrl forces an exact Origin (e.g. a foreign host for the CSRF test);
+  // otherwise default to the same-origin STAGE_URL unless origin:false strips it.
+  if (opts.originUrl !== undefined) headers.Origin = opts.originUrl;
+  else if (opts.origin !== false) headers.Origin = STAGE_URL;
   return fetch(`${STAGE_URL}/api/admin/seasons/${id}/${action}`, {
     method: "PATCH",
     headers,
@@ -129,7 +132,7 @@ describe("POST /api/admin/seasons", () => {
     expect(res.status).toBe(400);
   });
 
-  it("CSRF: missing Origin rejected (403)", async () => {
+  it("CSRF: header-less same-origin request accepted (SameSite=Strict is the defense)", async () => {
     if (SKIP) return;
     const cookie = createTestAdminSession();
     const res = await postSeason(
@@ -137,7 +140,11 @@ describe("POST /api/admin/seasons", () => {
       { code: SEASON_NEW, name: "x" },
       { origin: false },
     );
-    expect(res.status).toBe(403);
+    // No Origin/Referer + valid session cookie = same-site (Strict cookie can't
+    // ride a cross-site request). The mutation must succeed, not 403.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
   });
 
   it("no session rejected (401)", async () => {
@@ -226,12 +233,14 @@ describe("PATCH /api/admin/seasons/:id/activate", () => {
     expect(res.status).toBe(404);
   });
 
-  it("CSRF: missing Origin rejected (403)", async () => {
+  it("CSRF: header-less same-origin activate accepted (SameSite=Strict is the defense)", async () => {
     if (SKIP) return;
     const cookie = createTestAdminSession();
     const id = seedSeason({ code: SEASON_TO_ACTIVATE, status: "draft" });
     const res = await patchSeason(cookie, id, "activate", {}, { origin: false });
-    expect(res.status).toBe(403);
+    // Header-less + valid session = same-site; the activation must go through.
+    expect(res.status).toBe(200);
+    expect(seasonRow(SEASON_TO_ACTIVATE)?.status).toBe("active");
   });
 });
 
@@ -337,11 +346,52 @@ describe("PATCH /api/admin/seasons/:id/archive", () => {
     expect(res.status).toBe(404);
   });
 
-  it("CSRF: missing Origin rejected (403)", async () => {
+  it("CSRF: header-less same-origin archive accepted (SameSite=Strict is the defense)", async () => {
     if (SKIP) return;
     const cookie = createTestAdminSession();
     const id = seedSeason({ code: SEASON_ARCH, status: "draft" });
     const res = await patchSeason(cookie, id, "archive", {}, { origin: false });
+    // Header-less + valid session = same-site; the archive must go through.
+    expect(res.status).toBe(200);
+    expect(seasonRow(SEASON_ARCH)?.status).toBe("archived");
+  });
+});
+
+// --- CSRF policy regression (Fix #1/#10) ----------------------------------
+//
+// requireSameOrigin() used to `return false` when a request had NEITHER Origin
+// NOR Referer, locking privacy-hardened browsers (Safari tracking-prevention
+// strips both on same-origin fetch) out of every admin mutation. SameSite=Strict
+// on mh_session is the real CSRF defense — a cross-site request can never carry
+// the cookie — so a header-less *authenticated* request is necessarily same-site
+// and must be accepted. A request that DOES present a foreign Origin is still a
+// forgery signal and stays rejected.
+describe("CSRF: header-less vs foreign Origin (requireSameOrigin policy)", () => {
+  it("header-less same-origin mutation is accepted (SameSite=Strict is the CSRF defense)", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const id = seedSeason({ code: SEASON_TO_ACTIVATE, status: "draft" });
+    // Valid session cookie + NO Origin AND NO Referer.
+    const res = await patchSeason(cookie, id, "activate", {}, { origin: false });
+    expect(res.status).not.toBe(403);
+    // And the mutation actually applied (not silently no-op'd).
+    expect(seasonRow(SEASON_TO_ACTIVATE)?.status).toBe("active");
+  });
+
+  it("foreign Origin still rejected", async () => {
+    if (SKIP) return;
+    const cookie = createTestAdminSession();
+    const id = seedSeason({ code: SEASON_TO_ACTIVATE, status: "draft" });
+    // Valid session cookie but a cross-site Origin → CSRF rejection.
+    const res = await patchSeason(
+      cookie,
+      id,
+      "activate",
+      {},
+      { originUrl: "https://evil.example.com" },
+    );
     expect(res.status).toBe(403);
+    // Rejected before any write — season stays draft.
+    expect(seasonRow(SEASON_TO_ACTIVATE)?.status).toBe("draft");
   });
 });

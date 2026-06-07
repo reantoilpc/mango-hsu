@@ -225,14 +225,14 @@ describe("V6 P6 product-groups create", () => {
     expect(res.status).toBe(401);
   });
 
-  it("csrf: missing Origin returns 403", async () => {
+  it("csrf: foreign Origin returns 403", async () => {
     if (SKIP) return;
     seedScenario();
     const cookie = createTestAdminSession();
     const res = await createGroup(
       cookie,
       { slug: NEW_SLUG, name: "test-x" },
-      { origin: null },
+      { origin: "https://evil.example.com" },
     );
     expect(res.status).toBe(403);
   });
@@ -383,7 +383,7 @@ describe("V6 P6 product-groups update (PATCH)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("csrf: missing Origin returns 403", async () => {
+  it("csrf: foreign Origin returns 403", async () => {
     if (SKIP) return;
     seedScenario();
     const cookie = createTestAdminSession();
@@ -391,7 +391,7 @@ describe("V6 P6 product-groups update (PATCH)", () => {
       cookie,
       existingGroupId,
       { name: "test-x" },
-      { origin: null },
+      { origin: "https://evil.example.com" },
     );
     expect(res.status).toBe(403);
   });

@@ -131,6 +131,21 @@ export const POST: APIRoute = async ({ request, params }) => {
       .bind(groupId)
       .first<{ stock_fen: number }>();
     const currentPoolFen = cur?.stock_fen ?? 0;
+    // Check staleness FIRST: if the pool moved since the client read `expectedFen`, the delta
+    // was computed against a stale base, so a negativity verdict is meaningless — tell the
+    // client to refresh (STALE_STATE). Only a delta that goes negative against the CURRENT
+    // (unchanged) pool is a genuine INVALID_DELTA.
+    if (currentPoolFen !== expectedFen) {
+      return json(
+        {
+          ok: false,
+          error_code: "STALE_STATE",
+          message: "pool changed since you loaded — refresh and retry",
+          current_pool_fen: currentPoolFen,
+        },
+        409,
+      );
+    }
     if (currentPoolFen + body.delta_fen < 0) {
       return json(
         {

@@ -160,7 +160,7 @@ describe("V5.2 /products/batch endpoint", () => {
     expect(res.status).toBe(404);
   });
 
-  it("CSRF: missing Origin header → rejected", async () => {
+  it("CSRF: foreign Origin header → rejected", async () => {
     if (SKIP) return;
     seedTwoSkus();
     const cookie = createTestAdminSession();
@@ -170,9 +170,12 @@ describe("V5.2 /products/batch endpoint", () => {
       headers: {
         "Content-Type": "application/json",
         Cookie: cookie,
+        // Header-less is now accepted (SameSite=Strict is the CSRF defense);
+        // a FOREIGN Origin is what must still be rejected.
+        Origin: "https://evil.example.com",
       },
       body: JSON.stringify({ rows: [{ sku: TEST_SKU_A, fields: { price: 9 } }] }),
     });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(403);
   });
 });

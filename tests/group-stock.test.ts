@@ -164,6 +164,34 @@ describe("V5.2 group fen pool race", () => {
     expect(getGroupStockFen(groupBId)).toBe(0);
   });
 
+  it("cross-group order, FIRST group sold out, later in-stock group still restored (index-0 miss)", async () => {
+    if (SKIP) return;
+    // Mirror image of the previous case: the SOLD-OUT group is iterated FIRST.
+    // group_decrements order follows items[] order, so listing the out-of-stock group's SKU
+    // first puts the CAS miss at index 0. The old slice(0, i) compensation restored nothing
+    // when i===0 (no preceding indices), silently leaking the LATER group's committed debit.
+    // group B has 0 (sold out, first), group A has plenty (in stock, second).
+    seedTwoGroupMix({ groupAFen: 500, groupBFen: 0 });
+
+    const res = await customerOrder([
+      { sku: SKU_B1, qty: 1 }, // 100 fen from group B (index 0 → CAS miss)
+      { sku: SKU_A1, qty: 1 }, // 100 fen from group A (would commit; must be restored)
+    ]);
+    const body = (await res.json()) as {
+      ok: boolean;
+      error_code?: string;
+      sold_out_group_id?: number;
+    };
+    expect(body.ok).toBe(false);
+    expect(body.error_code).toBe("SOLD_OUT");
+    expect(body.sold_out_group_id).toBe(groupBId);
+
+    // The in-stock group iterated AFTER the miss must be fully restored — this is the leak
+    // the index-0 compensation bug allowed (group A would have ended at 400 fen).
+    expect(getGroupStockFen(groupAId)).toBe(500);
+    expect(getGroupStockFen(groupBId)).toBe(0);
+  });
+
   it("after successful order, audit row exists for the group decrement", async () => {
     if (SKIP) return;
     seedTwoGroupMix({ groupAFen: 200, groupBFen: 0 });

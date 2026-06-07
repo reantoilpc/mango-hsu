@@ -18,6 +18,11 @@ const shipDesc = describeShipping(shipConfig);
 // client scope) — doing so threw a ReferenceError that swallowed the sold-out message.
 const groupNameById: Record<number, string> = {};
 for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
+// FIX #13: SSR-baked group_id → group_stock_fen pool so the client can block a
+// cart whose summed demand for one flavour (multiple package sizes share one pool)
+// exceeds that pool, instead of letting the server bounce it as SOLD_OUT.
+const groupStockFenById: Record<number, number> = {};
+for (const p of settings.products) groupStockFenById[p.group_id] = p.group_stock_fen;
 ---
 
 <Layout title="下訂 · 芒果許">
@@ -124,6 +129,7 @@ for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
                       data-sku={p.sku}
                       data-price={p.price}
                       data-package-fen={p.package_fen}
+                      data-group-id={p.group_id}
                       min="0"
                       max={Math.min(99, p.derived_available_count)}
                       value="0"
@@ -319,6 +325,12 @@ for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
     id="group-names"
     set:html={JSON.stringify(groupNameById)}
   />
+  <script
+    is:inline
+    type="application/json"
+    id="group-stock"
+    set:html={JSON.stringify(groupStockFenById)}
+  />
 </Layout>
 
 <script>
@@ -334,6 +346,12 @@ for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
     const groupNamesNode = document.getElementById("group-names");
     const groupNameById: Record<number, string> = groupNamesNode
       ? JSON.parse(groupNamesNode.textContent || "{}")
+      : {};
+    // FIX #13: group_id → pool fen, to pre-check a one-flavour-multi-size cart
+    // against its shared pool before submit.
+    const groupStockNode = document.getElementById("group-stock");
+    const groupStockFenById: Record<number, number> = groupStockNode
+      ? JSON.parse(groupStockNode.textContent || "{}")
       : {};
     // V6 §5.5: shipping_config baked by SSR island so the live preview matches the server.
     type ShipConfig =
@@ -365,24 +383,37 @@ for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
       totalQty: number;
       subtotal: number;
       totalFen: number;
+      groupFen: Record<number, number>;
     } {
       const items: OrderItem[] = [];
       let totalQty = 0;
       let subtotal = 0;
       let totalFen = 0;
+      const groupFen: Record<number, number> = {};
       qtyInputs.forEach((el) => {
         const qty = Math.max(0, Math.floor(Number(el.value) || 0));
         if (qty > 0) {
           const sku = el.dataset.sku as OrderItem["sku"];
           const price = Number(el.dataset.price ?? 0);
           const packageFen = Number(el.dataset.packageFen ?? 0);
+          const groupId = Number(el.dataset.groupId ?? 0);
           items.push({ sku, qty });
           totalQty += qty;
           subtotal += price * qty;
           totalFen += packageFen * qty;
+          groupFen[groupId] = (groupFen[groupId] ?? 0) + packageFen * qty;
         }
       });
-      return { items, totalQty, subtotal, totalFen };
+      return { items, totalQty, subtotal, totalFen, groupFen };
+    }
+
+    // FIX #13: the first flavour whose summed demand exceeds its shared pool, or null.
+    function overStockedGroup(groupFen: Record<number, number>): number | null {
+      for (const [gid, fen] of Object.entries(groupFen)) {
+        const pool = groupStockFenById[Number(gid)] ?? 0;
+        if (fen > pool) return Number(gid);
+      }
+      return null;
     }
 
     function recomputeSummary() {
@@ -413,9 +444,17 @@ for (const p of settings.products) groupNameById[p.group_id] = p.group_name;
 
       if (!form.reportValidity()) return;
 
-      const { items, totalQty } = computeItems();
+      const { items, totalQty, groupFen } = computeItems();
       if (totalQty === 0) {
         showError("請至少選購一項。");
+        return;
+      }
+      // FIX #13: a flavour's multiple sizes share one stock pool; block before
+      // submit when their combined demand exceeds the pool (the server would
+      // otherwise bounce it as SOLD_OUT with no quantity guidance).
+      const overGid = overStockedGroup(groupFen);
+      if (overGid !== null) {
+        showError(`${groupNameById[overGid] ?? "選購商品"}庫存不足，請減少數量後再送出。`);
         return;
       }
 

@@ -106,7 +106,15 @@ export async function createSession(
   return { token, expiresAt };
 }
 
-export type SessionInfo = { email: string; role: "admin" | "operator" };
+// FIX #4: must_change_password is carried on the session so middleware can
+// ENFORCE the first-login password change (previously only a single login-time
+// redirect suggested it, trivially bypassed by visiting any other /admin URL).
+// Optional so authorizeAdmin()'s own lighter session construction still satisfies it.
+export type SessionInfo = {
+  email: string;
+  role: "admin" | "operator";
+  must_change_password?: boolean;
+};
 
 export async function verifySession(db: Db, token: string): Promise<SessionInfo | null> {
   const rows = await db
@@ -115,6 +123,7 @@ export async function verifySession(db: Db, token: string): Promise<SessionInfo 
       expires_at: sessions.expires_at,
       email: admin_users.email,
       role: admin_users.role,
+      must_change_password: admin_users.must_change_password,
     })
     .from(sessions)
     .innerJoin(admin_users, eq(admin_users.email, sessions.user_email))
@@ -126,7 +135,11 @@ export async function verifySession(db: Db, token: string): Promise<SessionInfo 
     await db.delete(sessions).where(eq(sessions.token, token));
     return null;
   }
-  return { email: row.email, role: row.role };
+  return {
+    email: row.email,
+    role: row.role,
+    must_change_password: row.must_change_password,
+  };
 }
 
 export async function rotateSession(

@@ -58,16 +58,27 @@ export const POST: APIRoute = async ({ request, params }) => {
   }
 
   const now = new Date().toISOString();
-  const result = await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE orders SET paid = 1, paid_at = ?, paid_by = ? WHERE order_id = ? AND paid = 0 AND cancelled_at IS NULL",
-    ).bind(now, auth.session.email, id),
-    env.DB.prepare(
-      "INSERT INTO audit_log (ts, user_email, action, order_id) VALUES (?, ?, 'mark_paid', ?)",
-    ).bind(now, auth.session.email, id),
-  ]);
 
-  const changes = result[0]?.meta?.changes ?? 0;
-  if (changes === 0) return text("not_changed (already paid? cancelled?)", 409);
+  // Gate-first: run the guarded UPDATE as a STANDALONE statement and inspect
+  // meta.changes BEFORE writing audit. A 0-row UPDATE inside a D1 batch is a
+  // SUCCESSFUL statement (no rollback), so batching the audit INSERT alongside
+  // the gate would commit a phantom mark_paid row on a 409. Only the winner
+  // (changes === 1) writes audit.
+  const gate = await env.DB.prepare(
+    "UPDATE orders SET paid = 1, paid_at = ?, paid_by = ? WHERE order_id = ? AND paid = 0 AND cancelled_at IS NULL",
+  )
+    .bind(now, auth.session.email, id)
+    .run();
+
+  if ((gate.meta?.changes ?? 0) === 0) {
+    return text("not_changed (already paid? cancelled?)", 409);
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO audit_log (ts, user_email, action, order_id) VALUES (?, ?, 'mark_paid', ?)",
+  )
+    .bind(now, auth.session.email, id)
+    .run();
+
   return json({ ok: true });
 };

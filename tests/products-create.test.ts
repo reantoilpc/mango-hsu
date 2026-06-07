@@ -219,7 +219,7 @@ describe("V6 P1 /api/admin/products/create", () => {
     expect(res.status).toBe(401);
   });
 
-  it("csrf: missing Origin → 403", async () => {
+  it("csrf: foreign Origin → 403", async () => {
     if (SKIP) return;
     seedScenario();
     const cookie = createTestAdminSession();
@@ -233,7 +233,7 @@ describe("V6 P1 /api/admin/products/create", () => {
         package_fen: PACKAGE_FEN,
         group_slug: TEST_GROUP_SLUG,
       },
-      { origin: null },
+      { origin: "https://evil.example.com" },
     );
     expect(res.status).toBe(403);
   });

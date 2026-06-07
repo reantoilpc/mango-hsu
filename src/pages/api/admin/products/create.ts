@@ -44,6 +44,9 @@ export const POST: APIRoute = async ({ request }) => {
   if (!name || name.length > 50) return text("bad name", 400);
   if (!variant || variant.length > 30) return text("bad variant", 400);
   if (!Number.isInteger(price) || price < 0 || price > 100_000) return text("bad price", 400);
+  // FIX #15: validate display_order is a non-negative integer (matches batch.ts).
+  if (!Number.isInteger(display_order) || display_order < 0)
+    return text("bad display_order", 400);
   if (!groupSlug || !/^[a-z0-9-]+$/.test(groupSlug)) return text("bad group_slug", 400);
   if (!Number.isInteger(package_fen) || package_fen <= 0 || package_fen > 100_000)
     return text("bad package_fen (positive integer up to 100000)", 400);

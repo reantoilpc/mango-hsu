@@ -31,6 +31,9 @@ const itemRows = await db
 // V5.2: stock derived from product_groups.stock_fen / products.package_fen.
 // Inner-join to get the pool, then compute per-SKU available count so the
 // "add item" dropdown and qty caps see real numbers (was undefined before).
+// FIX #17: scope to THIS order's own season. SKU is only unique per
+// (season_id, sku), so without the season filter a future season reusing a
+// SKU string would let the wrong product render in the Map keyed by sku.
 const productJoined = await db
   .select({
     sku: products.sku,
@@ -42,7 +45,8 @@ const productJoined = await db
     group_stock_fen: product_groups.stock_fen,
   })
   .from(products)
-  .innerJoin(product_groups, eq(products.group_id, product_groups.id));
+  .innerJoin(product_groups, eq(products.group_id, product_groups.id))
+  .where(eq(products.season_id, order.season_id));
 const productRows = productJoined.map((p) => ({
   ...p,
   stock: Math.floor(p.group_stock_fen / p.package_fen),
@@ -435,8 +439,11 @@ const orderShipConfig = seasonCfgRows[0]?.shipping_config ?? null;
       cancelled_at: stateIsland.cancelled_at,
       // Items fingerprint at page-load. Sent with every /save so the server
       // can detect another tab modifying items between this page-load and
-      // submit (the "double-decrement" race).
-      items_hash: itemsHash(initialItems),
+      // submit (the "double-decrement" race). Only send when the item editor
+      // is rendered: for paid/shipped orders the editor is absent, initialItems
+      // is [], and itemsHash([]) === "" — the server would read that empty
+      // string as a provided-but-stale hash and 409 on every address/notes fix.
+      items_hash: itemsEditor ? itemsHash(initialItems) : undefined,
     };
     const shippingFeeTwd = stateIsland.shippingFeeTwd ?? 150;
     // V6 §5.5: parse this order's season shipping_config for the preview.

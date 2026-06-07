@@ -1,11 +1,12 @@
 import type { APIRoute } from "astro";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { json, text } from "../../../../lib/admin-api";
 import { makeDb } from "../../../../db/client";
 import { admin_users, sessions } from "../../../../db/schema";
 import { env } from "../../../../lib/env";
 import { requireSameOrigin } from "../../../../lib/csrf";
 import { hashPassword, sha256Hex } from "../../../../lib/auth";
+import { sendTelegramMessage } from "../../../../lib/telegram";
 
 // V6 §5.6 — forgot-password completion endpoint.
 //
@@ -86,19 +87,38 @@ export const POST: APIRoute = async ({ request }) => {
   // Atomic-ish completion: update creds + clear token, then wipe sessions, then audit.
   // The UPDATE is guarded by `reset_token = tokenHash` so a concurrent second submit of the
   // same token (race) changes 0 rows on the loser (token already cleared) — see reuse test.
-  await db
-    .update(admin_users)
-    .set({
-      password_hash: newHash,
-      must_change_password: false,
-      reset_token: null,
-      reset_token_expires_at: null,
-    })
-    .where(and(eq(admin_users.email, user.email), eq(admin_users.reset_token, tokenHash)));
+  const upd = await env.DB
+    .prepare(
+      "UPDATE admin_users SET password_hash = ?, must_change_password = 0, reset_token = NULL, reset_token_expires_at = NULL WHERE email = ? AND reset_token = ?",
+    )
+    .bind(newHash, user.email, tokenHash)
+    .run();
+
+  // FIX #11: verify a row actually changed before declaring success. In a concurrent
+  // two-tab reset (same link, two different new passwords) the loser's token-guarded
+  // UPDATE matches 0 rows; without this check it still returned ok:true and logged a
+  // false "rotated" audit, so the user saw "success" yet couldn't log in with that password.
+  if ((upd.meta?.changes ?? 0) === 0) {
+    await audit("password_reset_failed", user.email, { reason: "token_consumed_race" });
+    return text("invalid or expired token", 400);
+  }
 
   await db.delete(sessions).where(eq(sessions.user_email, user.email));
 
   await audit("password_reset_success", user.email, { email: user.email, rotated: true });
+
+  // FIX #12: the reset link goes to the SHARED store Telegram and the token alone
+  // completes the reset, so an insider with chat access could silently take over an
+  // admin account. Push a distinct alert so a takeover is visible to the owner.
+  // Fire-and-forget (sendTelegramMessage swallows its own errors).
+  void sendTelegramMessage(
+    env,
+    [
+      "⚠️ 後台密碼已被重設",
+      `帳號：${user.email}`,
+      "若不是你本人操作，請立即聯絡管理員並重新申請重設。",
+    ].join("\n"),
+  );
 
   return json({ ok: true });
 };
