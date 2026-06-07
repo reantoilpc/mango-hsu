@@ -81,6 +81,15 @@ const faviconHref =
                   {item.label}
                 </a>
               ))}
+              {/* FIX #5: logout (a POST, not a nav GET link). */}
+              <form method="POST" action="/api/admin/auth/logout" class="contents">
+                <button
+                  type="submit"
+                  class="inline-flex items-center min-h-[44px] px-3 py-2 rounded text-red-700 hover:bg-red-50"
+                >
+                  登出
+                </button>
+              </form>
             </nav>
             {/* Mobile: hamburger toggles a drawer. Hidden on desktop. */}
             <button
@@ -143,6 +152,15 @@ const faviconHref =
               {item.label}
             </a>
           ))}
+          {/* FIX #5: logout (a POST, not a nav GET link). */}
+          <form method="POST" action="/api/admin/auth/logout" class="mt-1">
+            <button
+              type="submit"
+              class="w-full text-left inline-flex items-center min-h-[44px] px-3 py-2 rounded text-red-700 hover:bg-red-50"
+            >
+              登出
+            </button>
+          </form>
         </nav>
       </div>
 

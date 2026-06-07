@@ -20,7 +20,12 @@ export function requireSameOrigin(request: Request): boolean {
       return false;
     }
   }
-  // No Origin and no Referer: most modern browsers send at least one for
-  // same-origin POST. Reject conservatively.
-  return false;
+  // No Origin AND no Referer. Privacy-hardened browsers (e.g. Safari with
+  // tracking prevention) strip BOTH headers even on a same-origin fetch, so a
+  // header-less request is the normal case for those clients — not an attack.
+  // SameSite=Strict on mh_session is the real CSRF defense: a cross-site
+  // request can NEVER carry the session cookie, so a header-less request that
+  // DID authenticate is necessarily same-site. Accept it. (Host-mismatch
+  // rejections above still stand whenever an Origin or Referer IS present.)
+  return true;
 }

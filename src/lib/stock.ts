@@ -136,20 +136,27 @@ export async function tryDecrementGroupStock(
   );
   const results = await env.DB.batch(stmts);
 
-  for (let i = 0; i < results.length; i++) {
-    if ((results[i]?.meta?.changes ?? 0) === 0) {
-      // Compensate already-decremented groups (indices 0..i-1)
-      if (i > 0) {
-        await env.DB.batch(
-          group_decrements.slice(0, i).map((d) =>
-            env.DB.prepare(
-              `UPDATE product_groups SET stock_fen = stock_fen + ? WHERE id = ?`,
-            ).bind(d.fen, d.group_id),
-          ),
-        );
-      }
-      return { ok: false, sold_out_group_id: group_decrements[i]!.group_id };
+  // D1 batch is all-or-nothing for COMMIT, but a 0-row CAS UPDATE is still a "successful"
+  // statement — no rollback. So a miss anywhere (incl. index 0) leaves every OTHER group's
+  // debit committed. Restore EVERY group that actually decremented (changes>0), regardless
+  // of iteration order, then report the FIRST missed group. The old slice(0, i) approach
+  // leaked stock when the index-0 group was the miss (nothing before it to slice) while a
+  // later group in the same batch had already committed its debit.
+  const missIdx = results.findIndex((r) => (r?.meta?.changes ?? 0) === 0);
+  if (missIdx !== -1) {
+    const toRestore = group_decrements.filter(
+      (_, j) => (results[j]?.meta?.changes ?? 0) > 0,
+    );
+    if (toRestore.length) {
+      await env.DB.batch(
+        toRestore.map((d) =>
+          env.DB.prepare(
+            `UPDATE product_groups SET stock_fen = stock_fen + ? WHERE id = ?`,
+          ).bind(d.fen, d.group_id),
+        ),
+      );
     }
+    return { ok: false, sold_out_group_id: group_decrements[missIdx]!.group_id };
   }
   return { ok: true };
 }
@@ -217,6 +224,13 @@ export async function adjustGroupStock(
       .bind(args.group_id)
       .first<{ stock_fen: number }>();
     const current_pool_fen = cur?.stock_fen ?? 0;
+    // Check staleness FIRST: a pool that MOVED since the client loaded must be reported as
+    // STALE_STATE, not INVALID_DELTA — the delta was computed against the stale value, so its
+    // negativity is meaningless until the client re-reads. Only when the pool is current
+    // (expected matches) does a would-go-negative delta genuinely mean INVALID_DELTA.
+    if (current_pool_fen !== args.expected_pool_fen) {
+      return { ok: false, error_code: "STALE_STATE", current_pool_fen };
+    }
     if (current_pool_fen + args.delta_fen < 0) {
       return { ok: false, error_code: "INVALID_DELTA", current_pool_fen };
     }

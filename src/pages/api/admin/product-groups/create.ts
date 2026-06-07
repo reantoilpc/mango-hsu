@@ -89,12 +89,34 @@ export const POST: APIRoute = async ({ request }) => {
   // insert-then-select pattern the test helper seedGroup uses. We deliberately
   // avoid `RETURNING` (no existing precedent in this codebase) to stay on the
   // already-proven `.run()` / `.first<>()` D1 surface used by intake.ts/stock.ts.
-  await env.DB.prepare(
-    `INSERT INTO product_groups (season_id, slug, name, stock_fen, available, display_order, created_at)
-     VALUES (?, ?, ?, 0, ?, ?, ?)`,
-  )
-    .bind(seasonId, slug, name, available ? 1 : 0, display_order, now)
-    .run();
+  //
+  // The app-level dup precheck above closes the common case, but it is NOT
+  // atomic with this INSERT: two near-simultaneous same-slug creates both pass
+  // the precheck, then the loser's INSERT violates the product_groups_season_slug
+  // unique index and throws. Catch that, re-query, and return the SAME clean
+  // SLUG_TAKEN 409 shape the precheck returns (which index.astro renders) rather
+  // than letting a raw constraint error surface as an HTTP 500.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO product_groups (season_id, slug, name, stock_fen, available, display_order, created_at)
+       VALUES (?, ?, ?, 0, ?, ?, ?)`,
+    )
+      .bind(seasonId, slug, name, available ? 1 : 0, display_order, now)
+      .run();
+  } catch {
+    const existing = await env.DB.prepare(
+      `SELECT id FROM product_groups WHERE season_id = ? AND slug = ?`,
+    )
+      .bind(seasonId, slug)
+      .first<{ id: number }>();
+    if (existing && typeof existing.id === "number") {
+      return json(
+        { ok: false, error_code: "SLUG_TAKEN", slug, season_id: seasonId },
+        409,
+      );
+    }
+    return json({ ok: false, error_code: "CREATE_FAILED" }, 500);
+  }
 
   const created = await env.DB.prepare(
     `SELECT id FROM product_groups WHERE season_id = ? AND slug = ?`,

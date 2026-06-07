@@ -2,7 +2,7 @@
 import Layout from "../../../layouts/Layout.astro";
 import { asc, eq } from "drizzle-orm";
 import { makeDb } from "../../../db/client";
-import { products, product_groups } from "../../../db/schema";
+import { products, product_groups, seasons } from "../../../db/schema";
 import { env } from "../../../lib/env";
 
 const session = Astro.locals.session;
@@ -14,6 +14,9 @@ const db = makeDb(env);
 // "剩 N 包" badge and the qty input's max attribute have a real number.
 // Show all SKUs the admin keeps on the menu — including stock=0 ones —
 // disabled-but-visible. Admin sees what's gone vs invisible-and-confusing.
+// FIX #17: scope to the active season. SKU is only unique per (season_id, sku),
+// so without the season filter a future season reusing a SKU string would
+// surface the wrong product in this build-order menu.
 const productRows = await db
   .select({
     sku: products.sku,
@@ -27,6 +30,8 @@ const productRows = await db
   })
   .from(products)
   .innerJoin(product_groups, eq(products.group_id, product_groups.id))
+  .innerJoin(seasons, eq(seasons.id, products.season_id))
+  .where(eq(seasons.status, "active"))
   .orderBy(asc(products.display_order));
 const sellableProducts = productRows
   .filter((p) => p.available)

@@ -53,5 +53,13 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
   }
 
   (ctx.locals as { session?: typeof session }).session = session;
+  // FIX #4: enforce the first-login password change server-side. A session with
+  // must_change_password set may ONLY reach /admin/change-password; every other
+  // /admin/** page redirects there (previously this was a single login-time
+  // redirect, bypassable by navigating directly to any other /admin URL). The
+  // change-password + logout APIs live under /api/** so they are not gated here.
+  if (session.must_change_password && url.pathname !== "/admin/change-password") {
+    return applySecurityHeaders(ctx.redirect("/admin/change-password"));
+  }
   return applySecurityHeaders(await next());
 });

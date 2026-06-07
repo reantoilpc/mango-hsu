@@ -371,6 +371,10 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
         if (field === "name" || field === "variant") {
           fields[field] = String(v);
         } else if (field === "price" || field === "display_order") {
+          // FIX #8: an emptied numeric cell yields "" and Number("") === 0, which
+          // would silently save price 0 (a free, orderable product). Skip empty
+          // values so a cleared cell is a no-op, never a 0-write.
+          if (v === "" || v === null || v === undefined) continue;
           fields[field] = Number(v);
         } else if (field === "available") {
           fields[field] = Boolean(v);
@@ -383,6 +387,17 @@ const preselectGroup = Astro.url.searchParams.get("group") ?? "";
 
     async function doSave(): Promise<void> {
       if (saving || !tracker) return;
+      // FIX #8: block the save (instead of silently dropping the edit) if a
+      // price/順序 cell was cleared — Number("") would otherwise write 0.
+      const hasEmptyNumber = Array.from(
+        document.querySelectorAll<HTMLInputElement>(
+          '[data-dirty-track="products"] input[type="number"]',
+        ),
+      ).some((el) => el.value.trim() === "");
+      if (hasEmptyNumber) {
+        showToast("價格／順序不可空白", { kind: "error" });
+        return;
+      }
       const rows = buildBatchPayload();
       if (rows.length === 0) return;
 

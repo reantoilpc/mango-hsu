@@ -33,12 +33,17 @@ export const POST: APIRoute = async ({ request, params }) => {
   const name = (body.name ?? "").trim();
   const variant = (body.variant ?? "").trim();
   const price = Number(body.price);
-  const available = Boolean(body.available);
+  // FIX #16: `available` is resolved against the existing row below, AFTER it is
+  // loaded — so an omitted field keeps the current value instead of
+  // un-publishing the SKU (Boolean(undefined) === false).
   const display_order = Number.isFinite(body.display_order) ? Number(body.display_order) : 0;
 
   if (!name || name.length > 50) return text("bad name", 400);
   if (!variant || variant.length > 30) return text("bad variant", 400);
   if (!Number.isInteger(price) || price < 0 || price > 100_000) return text("bad price", 400);
+  // FIX #15: validate display_order is a non-negative integer (matches batch.ts).
+  if (!Number.isInteger(display_order) || display_order < 0)
+    return text("bad display_order", 400);
 
   const db = makeDb(env);
 
@@ -61,6 +66,9 @@ export const POST: APIRoute = async ({ request, params }) => {
     .limit(1);
   if (existing.length === 0) return text("not found in active season", 404);
   const productId = existing[0]!.id;
+  // FIX #16: omitted `available` keeps the current value (no silent un-publish).
+  const available =
+    body.available === undefined ? existing[0]!.available : Boolean(body.available);
 
   const now = new Date().toISOString();
   await env.DB.batch([
