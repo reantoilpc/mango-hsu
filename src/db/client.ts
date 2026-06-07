@@ -8,7 +8,6 @@ export type AppEnv = {
   PUBLIC_ORDER_TOKEN: string;
   BANK_ACCOUNT_DISPLAY: string;
   SHIPPING_FEE_TWD: string;
-  FREE_SHIPPING_MIN_PACKAGES: string;
   ETA_DAYS_AFTER_PAYMENT: string;
   ACCEPTING_DRY: string;
   // Stage-only: when "1", X-Test-Mode header bypasses /api/orders rate limit.
