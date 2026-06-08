@@ -350,7 +350,20 @@ export function skipIfNoIntegration(): boolean {
 // removes it) with a REAL pbkdf2 hash for `password`. Used by reset tests that must verify
 // login works with the NEW password after a successful reset. password_hash is computed locally
 // via the same auth helper the app uses.
-import { hashPassword } from "../src/lib/auth";
+import { hashPassword, hmacResetCode } from "../src/lib/auth";
+
+// Stage's RESET_OTP_SECRET, mirrored into the test env so tests can compute the SAME stored HMAC
+// the server computes and inject it via setResetToken. Integration reset tests that inject a known
+// code require this to equal stage's secret; without it, skip via skipIfNoResetSecret().
+export const TEST_RESET_OTP_SECRET = process.env.TEST_RESET_OTP_SECRET ?? "";
+
+export async function resetCodeHmac(email: string, code: string): Promise<string> {
+  return hmacResetCode(TEST_RESET_OTP_SECRET, email, code);
+}
+
+export function skipIfNoResetSecret(): boolean {
+  return skipIfNoIntegration() || !TEST_RESET_OTP_SECRET;
+}
 
 export async function seedAdminUser(opts: {
   email: string;
@@ -369,29 +382,32 @@ export async function seedAdminUser(opts: {
   );
 }
 
-// Read the stored reset_token (hash) + expiry for an admin. Returns nulls if unset.
+// Read the stored reset_token (HMAC), expiry, and attempt count for an admin.
 export function getResetTokenRow(email: string): {
   reset_token: string | null;
   reset_token_expires_at: string | null;
+  reset_attempts: number;
 } {
   const rows = d1Execute(
-    `SELECT reset_token, reset_token_expires_at FROM admin_users WHERE email = '${email}'`,
-  ) as Array<{ reset_token: string | null; reset_token_expires_at: string | null }>;
+    `SELECT reset_token, reset_token_expires_at, reset_attempts FROM admin_users WHERE email = '${email}'`,
+  ) as Array<{ reset_token: string | null; reset_token_expires_at: string | null; reset_attempts: number }>;
   if (rows.length === 0) throw new Error(`getResetTokenRow: no admin ${email}`);
   return rows[0]!;
 }
 
-// Directly set an admin's reset_token (hash) + expiry — lets reset-submit tests install a known
-// token (and an EXPIRED one) without going through request-reset (which would push Telegram).
+// Directly set an admin's reset_token (HMAC) + expiry + attempts — lets reset-submit tests install
+// a known code's HMAC (and EXPIRED / partially-attempted states) without going through
+// request-reset (which would push Telegram).
 export function setResetToken(
   email: string,
   tokenHash: string | null,
   expiresAt: string | null,
+  attempts = 0,
 ): void {
   const tk = tokenHash === null ? "NULL" : `'${tokenHash}'`;
   const ex = expiresAt === null ? "NULL" : `'${expiresAt}'`;
   d1Execute(
-    `UPDATE admin_users SET reset_token = ${tk}, reset_token_expires_at = ${ex} WHERE email = '${email}'`,
+    `UPDATE admin_users SET reset_token = ${tk}, reset_token_expires_at = ${ex}, reset_attempts = ${attempts} WHERE email = '${email}'`,
   );
 }
 
@@ -422,44 +438,38 @@ export function seedSessionFor(email: string): string {
   return token;
 }
 
-// Wipe rl:reset:* KV keys between reset tests (1-hour TTL is far slower than test traffic; the
-// 3/hr/email limit would otherwise carry across test cases). Mirrors clearOrderRateLimit.
+// Wipe rl:reset:* AND rl:reset_verify:* KV keys between reset tests. The request limit (3/hr/email)
+// and the verify limit (10/15min/IP) both outlive test traffic and would otherwise carry across
+// cases. Mirrors clearOrderRateLimit.
 export function clearResetRateLimit() {
-  const list = spawnSync(
-    "bunx",
-    [
-      "wrangler",
-      "kv",
-      "key",
-      "list",
-      "--binding=RATELIMIT",
-      "--env=stage",
-      "--remote",
-      "--prefix=rl:reset:",
-    ],
-    { encoding: "utf-8" },
-  );
-  if (list.status !== 0) return;
-  let keys: Array<{ name: string }>;
-  try {
-    keys = JSON.parse(list.stdout);
-  } catch {
-    return;
-  }
-  for (const { name } of keys) {
-    spawnSync(
+  for (const prefix of ["rl:reset:", "rl:reset_verify:"]) {
+    const list = spawnSync(
       "bunx",
       [
         "wrangler",
         "kv",
         "key",
-        "delete",
-        name,
+        "list",
         "--binding=RATELIMIT",
         "--env=stage",
         "--remote",
+        `--prefix=${prefix}`,
       ],
       { encoding: "utf-8" },
     );
+    if (list.status !== 0) continue;
+    let keys: Array<{ name: string }>;
+    try {
+      keys = JSON.parse(list.stdout);
+    } catch {
+      continue;
+    }
+    for (const { name } of keys) {
+      spawnSync(
+        "bunx",
+        ["wrangler", "kv", "key", "delete", name, "--binding=RATELIMIT", "--env=stage", "--remote"],
+        { encoding: "utf-8" },
+      );
+    }
   }
 }
