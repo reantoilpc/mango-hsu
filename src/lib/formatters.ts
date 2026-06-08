@@ -52,3 +52,15 @@ export function formatTaipei(utcIso: string): string {
   const MM = String(taipei.getUTCMinutes()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd} ${HH}:${MM}`;
 }
+
+// Short Taipei timestamp "MM/DD HH:MM" — used in the Telegram order notification
+// where the year is obvious from context and a compact one-line read is preferred.
+export function formatTaipeiShort(utcIso: string): string {
+  const d = new Date(utcIso);
+  const taipei = new Date(d.getTime() + 8 * 3600_000);
+  const mm = String(taipei.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(taipei.getUTCDate()).padStart(2, "0");
+  const HH = String(taipei.getUTCHours()).padStart(2, "0");
+  const MM = String(taipei.getUTCMinutes()).padStart(2, "0");
+  return `${mm}/${dd} ${HH}:${MM}`;
+}
