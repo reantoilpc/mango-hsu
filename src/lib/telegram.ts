@@ -1,6 +1,7 @@
 import type { AppEnv, Db } from "../db/client";
 import { audit_log } from "../db/schema";
 import type { Order } from "../db/schema";
+import { formatTaipeiShort } from "./formatters";
 
 // V5.2: items shape is now generic — caller (api/orders.ts) passes the resolved
 // product info directly so telegram doesn't need to JOIN. sku/name/variant/qty
@@ -24,23 +25,30 @@ export async function notifyOrder(
     return;
   }
 
-  const itemsLine = items
+  // 品項逐行:「品名 規格 ×數量」(品名與規格間留一空格,例「愛文芒果乾 1 斤 ×1」)。
+  const itemsBlock = items
     .map((i) => {
-      const label = i.name && i.variant ? `${i.name}${i.variant}` : i.sku;
+      const label = i.name ? (i.variant ? `${i.name} ${i.variant}` : i.name) : i.sku;
       return `${label} ×${i.qty}`;
     })
-    .join("、");
+    .join("\n");
 
+  // 版面依店主閱讀習慣排列(2026-06-08 調整)。客戶備註僅在有填時插入;
+  // 「備註欄」與「合計」之間保留一空行(null 會被濾掉,空字串保留為空行)。
   const msg = [
-    `🥭 新訂單 ${order.order_id}`,
-    `客人: ${order.name} (${order.phone})`,
-    `品項: ${itemsLine}`,
-    `合計: $${order.total}（含運 ${order.shipping}）`,
-    `備註欄: ${order.expected_memo}`,
+    `新訂單 ${order.order_id}`,
+    `訂單時間: ${formatTaipeiShort(order.created_at)}`,
+    `客人: ${order.name}`,
+    `電話: ${order.phone}`,
     `地址: ${order.address}`,
-    order.notes ? `客戶備註: ${order.notes}` : "",
+    order.notes ? `客戶備註: ${order.notes}` : null,
+    `品項:`,
+    itemsBlock,
+    `備註欄: ${order.expected_memo}`,
+    ``,
+    `合計: $${order.total}（含運 ${order.shipping}）`,
   ]
-    .filter(Boolean)
+    .filter((line): line is string => line !== null)
     .join("\n");
 
   try {
