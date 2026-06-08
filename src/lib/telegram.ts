@@ -71,7 +71,7 @@ export async function notifyOrder(
   }
 }
 
-// V6 §5.6: generic Telegram push (forgot-password reset link, future alerts). Reuses the same
+// Generic Telegram push (forgot-password 6-digit OTP code, takeover alert, future alerts). Reuses the same
 // bot token + chat id as order notifications but with an arbitrary message body. Does NOT touch
 // notifyOrder (the live order-notification path stays untouched). Fire-and-forget friendly:
 // returns true on a 2xx send, false on misconfig/error — the caller decides whether to audit.

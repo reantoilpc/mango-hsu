@@ -1,5 +1,4 @@
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { sql } from "drizzle-orm";
 
 // Time convention:
 // - All timestamp columns store UTC ISO-8601 with 'Z' suffix (e.g. "2026-04-26T14:38:27.123Z").
@@ -81,28 +80,20 @@ export const products = sqliteTable(
   }),
 );
 
-export const admin_users = sqliteTable(
-  "admin_users",
-  {
-    email: text("email").primaryKey(),
-    password_hash: text("password_hash").notNull(), // "pbkdf2$<iters>$<base64-salt>$<base64-hash>"
-    role: text("role", { enum: ["admin", "operator"] }).notNull(),
-    must_change_password: integer("must_change_password", { mode: "boolean" })
-      .notNull()
-      .default(true),
-    created_at: text("created_at").notNull(),
-    // V6 §4.2: Telegram-channel forgot-password. Both nullable; cleared after a successful reset.
-    reset_token: text("reset_token"), // single-use opaque token (crypto.getRandomValues)
-    reset_token_expires_at: text("reset_token_expires_at"), // UTC ISO-8601 + Z; 30-min TTL set by the request-reset endpoint
-  },
-  (t) => ({
-    // Partial unique index: many NULLs allowed, but a non-null reset_token must be unique.
-    // Same partial-index pattern as seasons_active_singleton (D1 SQLite parser support verified).
-    uqResetToken: uniqueIndex("admin_users_reset_token_unique")
-      .on(t.reset_token)
-      .where(sql`${t.reset_token} IS NOT NULL`),
-  }),
-);
+export const admin_users = sqliteTable("admin_users", {
+  email: text("email").primaryKey(),
+  password_hash: text("password_hash").notNull(), // "pbkdf2$<iters>$<base64-salt>$<base64-hash>"
+  role: text("role", { enum: ["admin", "operator"] }).notNull(),
+  must_change_password: integer("must_change_password", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  created_at: text("created_at").notNull(),
+  // 6-digit OTP forgot-password (replaces the V6 link flow). All three are cleared after a
+  // successful reset OR when the 5-attempt cap is hit.
+  reset_token: text("reset_token"), // HMAC-SHA256(RESET_OTP_SECRET, "email:code") hex — never plaintext
+  reset_token_expires_at: text("reset_token_expires_at"), // UTC ISO-8601 + Z; 10-min TTL set by request-reset
+  reset_attempts: integer("reset_attempts").notNull().default(0), // wrong-code count; cap 5 → invalidate code
+});
 
 export const orders = sqliteTable(
   "orders",

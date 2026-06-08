@@ -21,6 +21,8 @@ export type AppEnv = {
   LINE_LIFF_ID: string;
   LINE_OA_ADD_FRIEND_URL: string;
   LIFF_BIND_HMAC_SECRET: string;
+  // HMAC key for 6-digit OTP password-reset codes (set via `wrangler secret put RESET_OTP_SECRET`).
+  RESET_OTP_SECRET: string;
   // Static assets binding (Astro Cloudflare adapter)
   ASSETS: Fetcher;
 };

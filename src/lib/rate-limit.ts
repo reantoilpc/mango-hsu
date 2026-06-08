@@ -97,3 +97,22 @@ export async function checkPublicStatusRate(env: AppEnv, ip: string): Promise<bo
   });
   return true;
 }
+
+// /api/admin/auth/reset-password (the verify step) throttle. 10 attempts per 15 min per IP.
+// Secondary defense behind the per-code 5-attempt cap (reset_attempts): stops one IP from
+// hammering the verify endpoint across accounts. On limit-hit the endpoint returns the SAME
+// generic 400 as a bad code (never 429 — a distinct status would itself be a signal).
+const RESET_VERIFY_LIMIT = 10;
+const RESET_VERIFY_WINDOW_SECONDS = 15 * 60;
+
+export async function checkResetVerifyRate(env: AppEnv, ip: string): Promise<boolean> {
+  const key = `rl:reset_verify:${ip}`;
+  const cur = await env.RATELIMIT.get(key);
+  const count = cur ? parseInt(cur, 10) : 0;
+  if (!Number.isFinite(count)) return false;
+  if (count >= RESET_VERIFY_LIMIT) return false;
+  await env.RATELIMIT.put(key, String(count + 1), {
+    expirationTtl: RESET_VERIFY_WINDOW_SECONDS,
+  });
+  return true;
+}

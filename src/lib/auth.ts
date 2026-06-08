@@ -34,24 +34,42 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// --- V6 forgot-password reset-token helpers ---
-// We store the SHA-256 hash of the reset token in admin_users.reset_token, never the
-// plaintext. The plaintext only travels inside the Telegram reset link. A leaked DB backup
-// therefore can't be used to forge a reset (SHA-256 is one-way). The token itself is a
-// 128-bit random value (not a low-entropy human password), so a single SHA-256 is sufficient
-// — no PBKDF2 stretching needed (and it keeps us well under the Workers 10ms CPU cap).
-export async function sha256Hex(input: string): Promise<string> {
-  const digest = await subtle.digest("SHA-256", enc.encode(input));
-  return bytesToHex(new Uint8Array(digest));
+// 6-digit numeric OTP via CSPRNG with rejection sampling (avoids modulo bias). Range
+// 000000–999999, left-padded. The plaintext code travels only inside the Telegram message; we
+// store hmacResetCode(code), never the code itself.
+export function generateOtpCode(): string {
+  const LIMIT = 1_000_000;
+  const MAX = Math.floor(0x100000000 / LIMIT) * LIMIT; // largest multiple of LIMIT ≤ 2^32
+  const buf = new Uint32Array(1);
+  let n: number;
+  do {
+    crypto.getRandomValues(buf);
+    n = buf[0]!;
+  } while (n >= MAX);
+  return String(n % LIMIT).padStart(6, "0");
 }
 
-// Generate an opaque single-use reset token. Returns BOTH the plaintext (goes in the link)
-// and its SHA-256 hash (stored in the DB column). 32 random bytes → 64 hex chars.
-export async function generateResetToken(): Promise<{ token: string; hash: string }> {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  const token = bytesToHex(bytes);
-  const hash = await sha256Hex(token);
-  return { token, hash };
+// HMAC-SHA256(secret, "lower(trim(email)):code") → hex. Keyed with a server secret so a DB leak
+// can't brute-reverse the low-entropy 6-digit code, and bound to the email so two users who draw
+// the same code produce different stored values.
+export async function hmacResetCode(secret: string, email: string, code: string): Promise<string> {
+  const key = await subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await subtle.sign("HMAC", key, enc.encode(`${email.trim().toLowerCase()}:${code}`));
+  return bytesToHex(new Uint8Array(mac));
+}
+
+// Constant-time compare of two equal-length hex strings (HMAC outputs). Length mismatch → false.
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 async function pbkdf2(

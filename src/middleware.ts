@@ -36,7 +36,6 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
   const PUBLIC_ADMIN_PATHS = new Set([
     "/admin/login",
     "/admin/forgot-password",
-    "/admin/reset-password",
   ]);
 
   if (!isAdmin || PUBLIC_ADMIN_PATHS.has(url.pathname)) {

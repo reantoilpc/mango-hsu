@@ -5,21 +5,23 @@ import { makeDb } from "../../../../db/client";
 import { admin_users, sessions } from "../../../../db/schema";
 import { env } from "../../../../lib/env";
 import { requireSameOrigin } from "../../../../lib/csrf";
-import { hashPassword, sha256Hex } from "../../../../lib/auth";
+import { hashPassword, hmacResetCode, timingSafeEqualHex } from "../../../../lib/auth";
+import { checkResetVerifyRate } from "../../../../lib/rate-limit";
 import { sendTelegramMessage } from "../../../../lib/telegram";
 
-// V6 §5.6 — forgot-password completion endpoint.
+// 6-digit OTP forgot-password completion endpoint. Replaces the V6 link flow.
 //
-// Auth model: NO session required. Defenses = requireSameOrigin + possession of a valid,
-// unexpired reset token (looked up by its sha256 hash). On success:
-//   1. password_hash = pbkdf2(new password); must_change_password = false
-//   2. reset_token + reset_token_expires_at cleared (link becomes single-use)
-//   3. ALL sessions for the user deleted (kicks off any attacker holding the old password)
-//   4. audit password_reset_success
-// We do NOT mint a new session here (unlike change-password): the user wasn't logged in, so
-// we send them to /admin/login to sign in with the new password (the client redirects).
+// Auth model: NO session. Defenses = requireSameOrigin + per-IP verify throttle + possession of a
+// valid, unexpired, not-attempt-exhausted code (matched by HMAC against the stored value). On
+// success: rotate password, clear reset_token/expiry/attempts (single-use), wipe ALL sessions,
+// audit, and push a takeover alert. We do NOT mint a session (the user wasn't logged in).
 //
-// Password policy mirrors change-password.ts: 12-char min (NIST SP 800-63B floor), 200 max.
+// Password policy mirrors change-password.ts: 12-char min, 200 max.
+
+const MAX_ATTEMPTS = 5;
+// Generic message reused for unknown email / no code / expired / exhausted / throttle — never
+// distinguishes these states to the client (enumeration + brute-force signal safety).
+const GENERIC_ERR = "驗證碼錯誤或已過期,請重新發送";
 
 async function audit(action: string, email: string, details: Record<string, unknown>): Promise<void> {
   await env.DB
@@ -28,51 +30,83 @@ async function audit(action: string, email: string, details: Record<string, unkn
     .run();
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, clientAddress }) => {
   if (!requireSameOrigin(request)) return text("csrf", 403);
 
-  let body: { token?: string; new_password?: string };
+  const ip = request.headers.get("cf-connecting-ip") || clientAddress || "unknown";
+  if (!(await checkResetVerifyRate(env, ip))) {
+    // Same generic 400 as a bad code — never 429 (a distinct status would itself be a signal).
+    return text(GENERIC_ERR, 400);
+  }
+
+  let body: { email?: string; code?: string; new_password?: string };
   try {
     body = await request.json();
   } catch {
     return text("bad json", 400);
   }
-  const token = String(body.token ?? "");
+  const email = String(body.email ?? "").trim().toLowerCase();
+  const code = String(body.code ?? "").trim();
   const next = String(body.new_password ?? "");
 
-  if (!token) {
-    await audit("password_reset_failed", "<unknown>", { reason: "invalid_token" });
-    return text("invalid or expired token", 400);
-  }
-
   const db = makeDb(env);
-  const tokenHash = await sha256Hex(token);
-
-  // Look up the admin by the token HASH. (Plaintext token never stored.)
   const rows = await db
     .select({
       email: admin_users.email,
+      reset_token: admin_users.reset_token,
       reset_token_expires_at: admin_users.reset_token_expires_at,
+      reset_attempts: admin_users.reset_attempts,
     })
     .from(admin_users)
-    .where(eq(admin_users.reset_token, tokenHash))
+    .where(eq(admin_users.email, email))
     .limit(1);
   const user = rows[0];
 
-  if (!user) {
-    await audit("password_reset_failed", "<unknown>", { reason: "invalid_token" });
-    return text("invalid or expired token", 400);
+  // Always compute a candidate HMAC (dummy inputs when the row/code is missing) so the response
+  // time doesn't reveal whether the email exists.
+  const candidate = await hmacResetCode(env.RESET_OTP_SECRET, email || "<none>", code || "<none>");
+
+  if (!user || !user.reset_token || !user.reset_token_expires_at) {
+    await audit("password_reset_failed", email, { reason: "no_active_code" });
+    return text(GENERIC_ERR, 400);
   }
 
-  // Expiry check.
-  const exp = user.reset_token_expires_at;
-  if (!exp || new Date(exp).getTime() < Date.now()) {
-    await audit("password_reset_failed", user.email, { reason: "expired_token" });
-    return text("invalid or expired token", 400);
+  const expired = new Date(user.reset_token_expires_at).getTime() < Date.now();
+  if (expired || user.reset_attempts >= MAX_ATTEMPTS) {
+    // Invalidate the dead/exhausted code so the row is clean for the next request.
+    await env.DB
+      .prepare("UPDATE admin_users SET reset_token = NULL, reset_token_expires_at = NULL WHERE email = ?")
+      .bind(user.email)
+      .run();
+    await audit("password_reset_failed", user.email, {
+      reason: expired ? "expired" : "attempts_exhausted",
+    });
+    return text(GENERIC_ERR, 400);
   }
 
-  // Password policy (mirror change-password.ts:34-38). Token is NOT consumed on a policy
-  // failure so the user can retry the same link with a compliant password.
+  if (!timingSafeEqualHex(candidate, user.reset_token)) {
+    const attempts = user.reset_attempts + 1;
+    if (attempts >= MAX_ATTEMPTS) {
+      // Final wrong try: increment AND invalidate the code in one statement.
+      await env.DB
+        .prepare(
+          "UPDATE admin_users SET reset_attempts = reset_attempts + 1, reset_token = NULL, reset_token_expires_at = NULL WHERE email = ?",
+        )
+        .bind(user.email)
+        .run();
+    } else {
+      await env.DB
+        .prepare("UPDATE admin_users SET reset_attempts = reset_attempts + 1 WHERE email = ? AND reset_token IS NOT NULL")
+        .bind(user.email)
+        .run();
+    }
+    await audit("password_reset_failed", user.email, { reason: "bad_code", attempts });
+    const remaining = Math.max(MAX_ATTEMPTS - attempts, 0);
+    return text(`驗證碼錯誤,還剩 ${remaining} 次`, 400);
+  }
+
+  // Code correct → password policy. Do NOT consume the code on a policy failure (let the user fix
+  // the password and retry the same code).
   if (next.length < 12) {
     await audit("password_reset_failed", user.email, { reason: "weak_password" });
     return text("new password too short (min 12)", 400);
@@ -84,40 +118,27 @@ export const POST: APIRoute = async ({ request }) => {
 
   const newHash = await hashPassword(next);
 
-  // Atomic-ish completion: update creds + clear token, then wipe sessions, then audit.
-  // The UPDATE is guarded by `reset_token = tokenHash` so a concurrent second submit of the
-  // same token (race) changes 0 rows on the loser (token already cleared) — see reuse test.
-  const upd = await env.DB
+  // Race-guarded completion: guard on reset_token so a concurrent second submit of the same code
+  // changes 0 rows on the loser (token already cleared) — see FIX #11 lineage.
+  const done = await env.DB
     .prepare(
-      "UPDATE admin_users SET password_hash = ?, must_change_password = 0, reset_token = NULL, reset_token_expires_at = NULL WHERE email = ? AND reset_token = ?",
+      "UPDATE admin_users SET password_hash = ?, must_change_password = 0, reset_token = NULL, reset_token_expires_at = NULL, reset_attempts = 0 WHERE email = ? AND reset_token = ?",
     )
-    .bind(newHash, user.email, tokenHash)
+    .bind(newHash, user.email, user.reset_token)
     .run();
 
-  // FIX #11: verify a row actually changed before declaring success. In a concurrent
-  // two-tab reset (same link, two different new passwords) the loser's token-guarded
-  // UPDATE matches 0 rows; without this check it still returned ok:true and logged a
-  // false "rotated" audit, so the user saw "success" yet couldn't log in with that password.
-  if ((upd.meta?.changes ?? 0) === 0) {
+  if ((done.meta?.changes ?? 0) === 0) {
     await audit("password_reset_failed", user.email, { reason: "token_consumed_race" });
-    return text("invalid or expired token", 400);
+    return text(GENERIC_ERR, 400);
   }
 
   await db.delete(sessions).where(eq(sessions.user_email, user.email));
-
   await audit("password_reset_success", user.email, { email: user.email, rotated: true });
 
-  // FIX #12: the reset link goes to the SHARED store Telegram and the token alone
-  // completes the reset, so an insider with chat access could silently take over an
-  // admin account. Push a distinct alert so a takeover is visible to the owner.
-  // Fire-and-forget (sendTelegramMessage swallows its own errors).
+  // Takeover alert (sendTelegramMessage swallows its own errors).
   void sendTelegramMessage(
     env,
-    [
-      "⚠️ 後台密碼已被重設",
-      `帳號：${user.email}`,
-      "若不是你本人操作，請立即聯絡管理員並重新申請重設。",
-    ].join("\n"),
+    ["⚠️ 後台密碼已被重設", `帳號:${user.email}`, "若不是你本人操作,請立即聯絡管理員並重新申請重設。"].join("\n"),
   );
 
   return json({ ok: true });
