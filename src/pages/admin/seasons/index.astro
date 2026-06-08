@@ -339,7 +339,14 @@ const statusClass: Record<string, string> = {
       const code = card.dataset.seasonCode ?? "";
       const unshipped = Number(card.dataset.unshipped ?? "0");
 
-      card.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach((btn) => {
+      // NOTE: scope to activate/archive ONLY. The 儲存運費 button also carries a
+      // data-action ("save-shipping") but is type="submit" and owned by the
+      // shipping form's submit handler below. A broad `button[data-action]`
+      // selector here double-bound it: this click handler disabled the submit
+      // button mid-click (HTML activation behavior then skips form submission),
+      // and fired a bogus PATCH /seasons/:id/save-shipping (404) — so the real
+      // /shipping-config save never ran. That was the "無法更改運費" bug.
+      card.querySelectorAll<HTMLButtonElement>('button[data-action="activate"], button[data-action="archive"]').forEach((btn) => {
         btn.addEventListener("click", async () => {
           const action = btn.dataset.action as "activate" | "archive";
 
