@@ -54,6 +54,44 @@ export async function generateResetToken(): Promise<{ token: string; hash: strin
   return { token, hash };
 }
 
+// 6-digit numeric OTP via CSPRNG with rejection sampling (avoids modulo bias). Range
+// 000000–999999, left-padded. The plaintext code travels only inside the Telegram message; we
+// store hmacResetCode(code), never the code itself.
+export function generateOtpCode(): string {
+  const LIMIT = 1_000_000;
+  const MAX = Math.floor(0x100000000 / LIMIT) * LIMIT; // largest multiple of LIMIT ≤ 2^32
+  const buf = new Uint32Array(1);
+  let n: number;
+  do {
+    crypto.getRandomValues(buf);
+    n = buf[0]!;
+  } while (n >= MAX);
+  return String(n % LIMIT).padStart(6, "0");
+}
+
+// HMAC-SHA256(secret, "lower(trim(email)):code") → hex. Keyed with a server secret so a DB leak
+// can't brute-reverse the low-entropy 6-digit code, and bound to the email so two users who draw
+// the same code produce different stored values.
+export async function hmacResetCode(secret: string, email: string, code: string): Promise<string> {
+  const key = await subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await subtle.sign("HMAC", key, enc.encode(`${email.trim().toLowerCase()}:${code}`));
+  return bytesToHex(new Uint8Array(mac));
+}
+
+// Constant-time compare of two equal-length hex strings (HMAC outputs). Length mismatch → false.
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 async function pbkdf2(
   plaintext: string,
   salt: Uint8Array,
