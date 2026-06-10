@@ -49,6 +49,13 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   const code = String(body.code ?? "").trim();
   const next = String(body.new_password ?? "");
 
+  // Fail-safe: a missing RESET_OTP_SECRET makes hmacResetCode() throw on an empty key → 500.
+  // Return the same generic error instead (audit the misconfig for the owner).
+  if (!env.RESET_OTP_SECRET) {
+    await audit("password_reset_misconfigured", email, { reason: "RESET_OTP_SECRET_unset" });
+    return text(GENERIC_ERR, 400);
+  }
+
   const db = makeDb(env);
   const rows = await db
     .select({

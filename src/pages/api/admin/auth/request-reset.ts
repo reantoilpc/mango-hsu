@@ -48,6 +48,15 @@ export const POST: APIRoute = async ({ request }) => {
     return ok();
   }
 
+  // Fail-safe: a missing RESET_OTP_SECRET makes hmacResetCode() throw on an empty HMAC key, which
+  // would 500 the endpoint AND still burn a rate-limit slot per attempt (the throttle increments
+  // before the throw) — silently breaking forgot-password with no code sent. Detect the misconfig,
+  // audit it, and return the same enumeration-consistent 200 (no 500, no rate-limit burn, no send).
+  if (!env.RESET_OTP_SECRET) {
+    await audit("password_reset_misconfigured", email, { reason: "RESET_OTP_SECRET_unset" });
+    return ok();
+  }
+
   if (!(await checkResetRequestRate(env, email))) {
     await audit("password_reset_failed", email, { reason: "rate_limited" });
     return ok();
