@@ -30,7 +30,7 @@ async function audit(action: string, email: string, details: Record<string, unkn
     .run();
 }
 
-export const POST: APIRoute = async ({ request, clientAddress }) => {
+export const POST: APIRoute = async ({ request, clientAddress, locals }) => {
   if (!requireSameOrigin(request)) return text("csrf", 403);
 
   const ip = request.headers.get("cf-connecting-ip") || clientAddress || "unknown";
@@ -142,10 +142,13 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   await db.delete(sessions).where(eq(sessions.user_email, user.email));
   await audit("password_reset_success", user.email, { email: user.email, rotated: true });
 
-  // Takeover alert (sendTelegramMessage swallows its own errors).
-  void sendTelegramMessage(
-    env,
-    ["⚠️ 後台密碼已被重設", `帳號:${user.email}`, "若不是你本人操作,請立即聯絡管理員並重新申請重設。"].join("\n"),
+  // Takeover alert — kept alive via waitUntil (a bare `void` fetch is cancelled when the worker
+  // returns, so the alert would never send). Non-blocking; sendTelegramMessage swallows its errors.
+  locals.cfContext?.waitUntil(
+    sendTelegramMessage(
+      env,
+      ["⚠️ 後台密碼已被重設", `帳號:${user.email}`, "若不是你本人操作,請立即聯絡管理員並重新申請重設。"].join("\n"),
+    ),
   );
 
   return json({ ok: true });

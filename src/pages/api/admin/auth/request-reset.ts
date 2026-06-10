@@ -30,7 +30,7 @@ async function audit(action: string, email: string, details: Record<string, unkn
     .run();
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   if (!requireSameOrigin(request)) return text("csrf", 403);
 
   let body: { email?: string };
@@ -94,8 +94,11 @@ export const POST: APIRoute = async ({ request }) => {
     "若非你本人申請,請忽略本訊息並通知管理員。",
   ].join("\n");
 
-  // Fire-and-forget: do NOT await (timing-leak guard). sendTelegramMessage swallows its own errors.
-  void sendTelegramMessage(env, msg);
+  // Non-blocking but kept alive via waitUntil: a bare `void` fetch is cancelled when the worker
+  // returns its response, so the code never actually sends (this is why no code arrived). waitUntil
+  // completes the send WITHOUT awaiting it on the response path (no timing leak). Same pattern as
+  // the order-notification path in orders.ts.
+  locals.cfContext?.waitUntil(sendTelegramMessage(env, msg));
 
   return ok();
 };
