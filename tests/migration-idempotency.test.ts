@@ -101,4 +101,19 @@ describe("V5.2 migration idempotency", () => {
     }
     expect(threw).toBe(true);
   });
+
+  it("reset_attempts ALTER re-run returns duplicate-column (migration runner skips applied)", async () => {
+    if (SKIP) return;
+    // admin_users.reset_attempts exists from migration 0008; re-ALTER must fail (the wrangler
+    // d1_migrations table tracks applied files by name, so this never reaches operators).
+    let threw = false;
+    try {
+      d1Execute(`ALTER TABLE admin_users ADD COLUMN reset_attempts integer DEFAULT 0 NOT NULL`);
+    } catch (err) {
+      threw = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(/duplicate|already exists/i.test(msg)).toBe(true);
+    }
+    expect(threw).toBe(true);
+  });
 });

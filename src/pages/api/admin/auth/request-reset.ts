@@ -30,7 +30,7 @@ async function audit(action: string, email: string, details: Record<string, unkn
     .run();
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   if (!requireSameOrigin(request)) return text("csrf", 403);
 
   let body: { email?: string };
@@ -45,6 +45,15 @@ export const POST: APIRoute = async ({ request }) => {
 
   if (!email) {
     await audit("password_reset_failed", "<unknown>", { reason: "missing_email" });
+    return ok();
+  }
+
+  // Fail-safe: a missing RESET_OTP_SECRET makes hmacResetCode() throw on an empty HMAC key, which
+  // would 500 the endpoint AND still burn a rate-limit slot per attempt (the throttle increments
+  // before the throw) — silently breaking forgot-password with no code sent. Detect the misconfig,
+  // audit it, and return the same enumeration-consistent 200 (no 500, no rate-limit burn, no send).
+  if (!env.RESET_OTP_SECRET) {
+    await audit("password_reset_misconfigured", email, { reason: "RESET_OTP_SECRET_unset" });
     return ok();
   }
 
@@ -85,8 +94,11 @@ export const POST: APIRoute = async ({ request }) => {
     "若非你本人申請,請忽略本訊息並通知管理員。",
   ].join("\n");
 
-  // Fire-and-forget: do NOT await (timing-leak guard). sendTelegramMessage swallows its own errors.
-  void sendTelegramMessage(env, msg);
+  // Non-blocking but kept alive via waitUntil: a bare `void` fetch is cancelled when the worker
+  // returns its response, so the code never actually sends (this is why no code arrived). waitUntil
+  // completes the send WITHOUT awaiting it on the response path (no timing leak). Same pattern as
+  // the order-notification path in orders.ts.
+  locals.cfContext?.waitUntil(sendTelegramMessage(env, msg));
 
   return ok();
 };
