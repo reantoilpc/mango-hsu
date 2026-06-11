@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { loadEnv } from "vite";
 import { validateOrderToken } from "./order-token-guard.mjs";
 
@@ -137,6 +138,32 @@ if (!expectedToken) {
   );
   process.exit(1);
 }
+
+// Guard 3 (2026-06-11 incident #3): the resolved token must belong to the TARGET env.
+// Guards 1/2 + the backstop only catch a missing/empty/stale token — NOT a valid token for the
+// WRONG env (e.g. .env.local left on the stage token while running `deploy:prod`). That shipped a
+// stage token to prod and broke EVERY customer order with INVALID_TOKEN three times
+// (2026-06-05 / -06-10 / -06-11). Compare a one-way fingerprint of the resolved token against the
+// target env's expected fingerprint (SHA-256[:16] — one-way, so committing it leaks nothing).
+const TOKEN_FINGERPRINT = {
+  stage: "2470809b547bbe0b",
+  prod: "577193a1dc518559",
+};
+const actualFp = createHash("sha256").update(expectedToken).digest("hex").slice(0, 16);
+if (actualFp !== TOKEN_FINGERPRINT[target]) {
+  console.error(
+    `\n✗ aborting deploy — PUBLIC_ORDER_TOKEN is NOT the ${target} env's token.\n` +
+      `  resolved fingerprint ${actualFp} ≠ expected ${target} ${TOKEN_FINGERPRINT[target]}.\n` +
+      `  You're almost certainly deploying with the OTHER env's token active in .env.local —\n` +
+      `  this is the recurring incident; a wrong-env token breaks every customer order.\n` +
+      `  Set .env.local's active PUBLIC_ORDER_TOKEN to the ${target} value, then:\n` +
+      `    rm -rf dist .astro node_modules/.vite && bun run deploy:${target}\n` +
+      `  (If the ${target} ORDER_TOKEN was rotated, update TOKEN_FINGERPRINT in scripts/deploy.mjs.)\n`,
+  );
+  process.exit(1);
+}
+console.log(`✓ PUBLIC_ORDER_TOKEN fingerprint matches ${target} (${actualFp})`);
+
 // Backstop: require the resolved token to actually appear in the client bundle. This
 // catches a stale build cache that re-shipped a previous env's token (Vite skips
 // re-inlining import.meta.env when only an env file changed but the source didn't).
