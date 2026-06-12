@@ -20,8 +20,14 @@ function validateCommon(body: CommonOrderInput): OrderResponse | null {
   if (typeof body.name !== "string" || body.name.trim().length === 0 || body.name.length > 50) {
     return { ok: false, error_code: "INVALID_INPUT", message: "姓名格式錯誤" };
   }
-  if (!/^09\d{8}$/.test(body.phone || "")) {
-    return { ok: false, error_code: "INVALID_INPUT", message: "手機格式錯誤" };
+  // Accept TW mobile (09xxxxxxxx) AND landline (area code + number, e.g. 06-6902222).
+  // Normalize spaces/hyphens, then require 0 + 8–9 digits (9–10 total). Stored as-entered.
+  if (!/^0\d{8,9}$/.test((body.phone || "").replace(/[\s-]/g, ""))) {
+    return {
+      ok: false,
+      error_code: "INVALID_INPUT",
+      message: "電話格式錯誤（手機或室內電話，例 0912345678 或 06-6902222）",
+    };
   }
   if (
     typeof body.address !== "string" ||

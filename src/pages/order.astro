@@ -81,7 +81,7 @@ for (const p of settings.products) groupStockFenById[p.group_id] = p.group_stock
 
             <div>
               <label class="block mb-1 text-sm font-medium" for="phone">
-                手機（TW 格式，例 0912345678）{" "}
+                電話（手機或室內電話，例 0912345678、06-6902222）{" "}
                 <span class="text-red-500">*</span>
               </label>
               <input
@@ -89,9 +89,9 @@ for (const p of settings.products) groupStockFenById[p.group_id] = p.group_stock
                 id="phone"
                 name="phone"
                 required
-                pattern="09[0-9]{8}"
-                inputmode="numeric"
-                maxlength="10"
+                pattern="0[0-9 -]{7,13}"
+                inputmode="tel"
+                maxlength="15"
                 class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white focus:border-mango-500 focus:ring-1 focus:ring-mango-500 outline-none"
               />
             </div>

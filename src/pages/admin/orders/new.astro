@@ -83,16 +83,16 @@ const idempotencyKey = crypto.randomUUID();
 
         <div>
           <label class="mb-1 block text-sm font-medium" for="phone">
-            手機（09 開頭 10 碼）<span class="text-red-500">*</span>
+            電話（手機或室內電話）<span class="text-red-500">*</span>
           </label>
           <input
             type="tel"
             id="phone"
             name="phone"
             required
-            pattern="09[0-9]{8}"
-            inputmode="numeric"
-            maxlength="10"
+            pattern="0[0-9 -]{7,13}"
+            inputmode="tel"
+            maxlength="15"
             class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
           />
         </div>
