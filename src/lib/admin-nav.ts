@@ -3,8 +3,11 @@
 // desktop header and the mobile drawer in Layout.astro.
 //
 // Active detection uses LONGEST matching href prefix so /admin/products is never
-// swallowed by a shorter shared substring, and /admin (dashboard root) maps to no
-// item (the dashboard isn't in the nav list — its own "管理後台" title stands in).
+// swallowed by a shorter shared substring. The "home" item (href /admin) is the
+// fallback: it's a prefix of every admin path, so the longest-match rule lets
+// specific pages (orders, audit, …) win, while /admin itself (and any unlisted
+// /admin/* page) maps to "home". 首頁 is in the nav so the dashboard — which hosts
+// the 銷售概況 sales summary — is reachable from the menu, not just at login.
 
 export type AdminRole = "admin" | "operator";
 
@@ -22,6 +25,7 @@ export interface AdminNavItem {
 // spec §5.5); P5/P3 own that page. Keeping a distinct key lets us re-point it later without
 // touching callers.
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
+  { key: "home", label: "首頁", href: "/admin", operatorVisible: true },
   { key: "orders", label: "訂單", href: "/admin/orders", operatorVisible: true },
   { key: "seasons", label: "年度設定", href: "/admin/seasons", operatorVisible: false },
   { key: "groups", label: "品種庫存", href: "/admin/product-groups", operatorVisible: false },
