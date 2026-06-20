@@ -1,0 +1,80 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import AdminBreadcrumb from "../../../components/admin/AdminBreadcrumb.astro";
+import { makeDb } from "../../../db/client";
+import { order_groups } from "../../../db/schema";
+import { desc, sql } from "drizzle-orm";
+import { formatTaipei } from "../../../lib/formatters";
+import { env } from "../../../lib/env";
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+if (session.role !== "admin") {
+  return new Response("admin only", { status: 403 });
+}
+
+const db = makeDb(env);
+const groups = await db
+  .select()
+  .from(order_groups)
+  .orderBy(desc(order_groups.created_at))
+  .limit(200);
+// Per-group active (non-cancelled) order counts. Keyed by order_group_id.
+const counts = await db.all<{ order_group_id: number; n: number }>(
+  sql`SELECT order_group_id, COUNT(*) AS n FROM orders WHERE order_group_id IS NOT NULL AND cancelled_at IS NULL GROUP BY order_group_id`,
+);
+const countMap = new Map(counts.map((c) => [c.order_group_id, c.n]));
+
+const statusMeta: Record<string, { label: string; cls: string }> = {
+  open: { label: "開團中", cls: "bg-emerald-100 text-emerald-700" },
+  closed: { label: "已關團", cls: "bg-amber-100 text-amber-700" },
+  shipped: { label: "已出貨", cls: "bg-blue-100 text-blue-700" },
+  cancelled: { label: "已取消", cls: "bg-gray-100 text-gray-500" },
+};
+---
+
+<Layout>
+  <main class="mx-auto max-w-5xl px-4 py-6">
+    <AdminBreadcrumb items={[{ label: "後台首頁", href: "/admin" }, { label: "併單" }]} />
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">併單列表</h1>
+      <div class="flex items-center gap-3">
+        <a
+          href="/admin/groups/new"
+          class="rounded-md bg-mango-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-mango-600"
+        >
+          + 發起併單
+        </a>
+        <a href="/admin" class="text-sm text-gray-600 underline">← 後台首頁</a>
+      </div>
+    </header>
+
+    <ul class="divide-y divide-gray-200 rounded border border-gray-200">
+      {groups.map((g) => {
+        const meta = statusMeta[g.status] ?? { label: g.status, cls: "bg-gray-100 text-gray-700" };
+        const n = countMap.get(g.id) ?? 0;
+        return (
+          <li class="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors">
+            <div class="min-w-0 flex-1">
+              <a href={`/admin/groups/${g.id}`} class="font-mono text-base font-semibold underline">
+                {g.code}
+              </a>
+              <span class="ml-2 text-gray-700">{g.host_name}</span>
+              <div class="text-sm text-gray-600 truncate">
+                {n} 筆訂單 ／ 截止 {formatTaipei(g.deadline)}
+              </div>
+            </div>
+            <span class:list={["flex-shrink-0 rounded px-2 py-0.5 text-xs", meta.cls]}>
+              {meta.label}
+            </span>
+          </li>
+        );
+      })}
+      {groups.length === 0 && (
+        <li class="px-4 py-8 text-center text-sm text-gray-500">
+          （尚無併單，按右上角「發起併單」開始）
+        </li>
+      )}
+    </ul>
+  </main>
+</Layout>
