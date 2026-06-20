@@ -76,7 +76,9 @@ export type OrderErrorCode =
   | "SEASON_CLOSED"
   | "INVALID_INPUT"
   | "INTERNAL"
-  | "unknown_product";
+  | "unknown_product"
+  // V7 併單: malformed group_code or no matching open group.
+  | "GROUP_INVALID";
 
 export interface OrderError {
   ok: false;

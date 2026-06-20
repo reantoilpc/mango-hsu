@@ -1,7 +1,8 @@
 import type { APIRoute } from "astro";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { makeDb } from "../../db/client";
-import { orders, order_items, audit_log, seasons } from "../../db/schema";
+import { orders, order_items, audit_log, seasons, order_groups } from "../../db/schema";
+import { isValidGroupCode } from "../../lib/order-groups";
 import { nextOrderId } from "../../lib/order-id";
 import { checkOrderRate } from "../../lib/rate-limit";
 import {
@@ -33,6 +34,7 @@ interface OrderRequest {
   items: Array<{ sku: string; qty: number }>;
   notes: string;
   pdpa_accepted: boolean;
+  group_code?: string;
 }
 
 const json = (body: OrderResponse, status = 200) =>
@@ -79,10 +81,27 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     return json({ ok: false, error_code: "INVALID_INPUT" });
   }
 
+  const db = makeDb(env);
+
+  // 併單: if a group_code is supplied, resolve the open group and force member fields.
+  // Runs BEFORE validateCustomerOrder so the validator sees the host address.
+  let groupCtx: { group_id: number; host_address: string } | null = null;
+  if (typeof body.group_code === "string" && body.group_code.trim() !== "") {
+    const code = body.group_code.trim();
+    if (!isValidGroupCode(code)) return json({ ok: false, error_code: "GROUP_INVALID" });
+    const nowIso = new Date().toISOString();
+    const g = await db
+      .select({ id: order_groups.id, host_address: order_groups.host_address })
+      .from(order_groups)
+      .where(and(eq(order_groups.code, code), eq(order_groups.status, "open"), gt(order_groups.deadline, nowIso)))
+      .limit(1);
+    if (g.length === 0) return json({ ok: false, error_code: "GROUP_INVALID" });
+    groupCtx = { group_id: g[0]!.id, host_address: g[0]!.host_address };
+    body.address = g[0]!.host_address; // server-authoritative; client's address is ignored
+  }
+
   const invalid = validateCustomerOrder(body);
   if (invalid) return json(invalid);
-
-  const db = makeDb(env);
 
   // 1) Idempotency: replay if key already exists.
   const prior = await db
@@ -134,7 +153,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   for (const r of resolved.resolved) {
     subtotal += r.price * r.qty;
   }
-  const shipping = shippingFor(resolved.resolved, shippingConfig);
+  const shipping = groupCtx ? 0 : shippingFor(resolved.resolved, shippingConfig);
   const total = subtotal + shipping;
 
   // 5) Read group stock_fen BEFORE the CAS so we can write before/after into audit_log.
@@ -164,7 +183,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     try {
       await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO orders (order_id, season_id, created_at, name, phone, address, notes, subtotal, shipping, total, expected_memo, pdpa_accepted, paid, shipped, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
+          `INSERT INTO orders (order_id, season_id, created_at, name, phone, address, notes, subtotal, shipping, total, expected_memo, pdpa_accepted, paid, shipped, idempotency_key, order_group_id, group_role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
         ).bind(
           orderId,
           seasonId,
@@ -179,6 +198,8 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
           expectedMemo,
           body.pdpa_accepted ? 1 : 0,
           body.idempotency_key,
+          groupCtx ? groupCtx.group_id : null,
+          groupCtx ? "member" : null,
         ),
         ...resolved.resolved.map((r) =>
           env.DB.prepare(
