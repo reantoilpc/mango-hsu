@@ -1,0 +1,273 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { asc, eq } from "drizzle-orm";
+import { makeDb } from "../../../db/client";
+import { products, product_groups, seasons } from "../../../db/schema";
+import { env } from "../../../lib/env";
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+if (session.role !== "admin") {
+  return new Response("admin only", { status: 403 });
+}
+
+const db = makeDb(env);
+// Same active-season product query as src/pages/admin/orders/new.astro:
+// stock lives on product_groups as a fen pool; per-SKU count is derived as
+// floor(group.stock_fen / sku.package_fen). Scoped to the active season so a
+// future season reusing a SKU string can't surface the wrong product here.
+const productRows = await db
+  .select({
+    sku: products.sku,
+    name: products.name,
+    variant: products.variant,
+    package_fen: products.package_fen,
+    price: products.price,
+    available: products.available,
+    display_order: products.display_order,
+    group_stock_fen: product_groups.stock_fen,
+  })
+  .from(products)
+  .innerJoin(product_groups, eq(products.group_id, product_groups.id))
+  .innerJoin(seasons, eq(seasons.id, products.season_id))
+  .where(eq(seasons.status, "active"))
+  .orderBy(asc(products.display_order));
+const sellableProducts = productRows
+  .filter((p) => p.available)
+  .map((p) => ({
+    ...p,
+    stock: Math.floor(p.group_stock_fen / p.package_fen),
+  }));
+
+// Deadline window in Asia/Taipei calendar days (the date <input> shows Taipei
+// dates): min = tomorrow, max = +14 days. Compute the Taipei "today" via the
+// en-CA locale (YYYY-MM-DD), then add days as plain calendar arithmetic.
+function taipeiYmd(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, day] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, day));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+const todayTaipei = taipeiYmd(new Date());
+const minDeadline = addDaysYmd(todayTaipei, 1); // tomorrow
+const maxDeadline = addDaysYmd(todayTaipei, 14); // +14 days (group cap)
+
+const idempotencyKey = crypto.randomUUID();
+---
+
+<Layout>
+  <main class="mx-auto max-w-2xl px-4 py-6">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">發起併單</h1>
+      <a href="/admin/groups" class="text-sm text-gray-600 underline">← 返回併單列表</a>
+    </header>
+
+    <p class="mb-4 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-gray-700">
+      由團主指定收件地址，整團一個運費、一個物流單號寄到同一個地址。<br />
+      團主自己也是一筆訂單；客人之後用 5 位數代碼加入。庫存照樣會扣。
+    </p>
+
+    {sellableProducts.length === 0 ? (
+      <div class="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-3 text-sm">
+        目前沒有上架中的商品，請先到 <a href="/admin/products" class="underline">商品管理</a> 設定。
+      </div>
+    ) : (
+      <form id="group-form" class="space-y-5" novalidate>
+        <input type="hidden" name="idempotency_key" value={idempotencyKey} />
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="host_name">
+            團主姓名（收件人）<span class="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            id="host_name"
+            name="host_name"
+            required
+            maxlength="50"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          />
+        </div>
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="host_phone">
+            團主電話（手機或室內電話）<span class="text-red-500">*</span>
+          </label>
+          <input
+            type="tel"
+            id="host_phone"
+            name="host_phone"
+            required
+            pattern="0[0-9 -]{7,13}"
+            inputmode="tel"
+            maxlength="15"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          />
+        </div>
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="host_address">
+            收件地址（整團寄送至此）<span class="text-red-500">*</span>
+          </label>
+          <textarea
+            id="host_address"
+            name="host_address"
+            required
+            rows="2"
+            maxlength="200"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          ></textarea>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="deadline">
+            截止日期（最多 14 天）<span class="text-red-500">*</span>
+          </label>
+          <input
+            type="date"
+            id="deadline"
+            name="deadline"
+            required
+            min={minDeadline}
+            max={maxDeadline}
+            value={minDeadline}
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          />
+        </div>
+
+        <div>
+          <p class="mb-2 block text-sm font-medium">
+            團主訂購品項 <span class="text-red-500">*</span>
+          </p>
+          <div class="space-y-3">
+            {sellableProducts.map((p) => (
+              <div class:list={[
+                "flex items-center gap-3 rounded-lg border bg-white px-3 py-2",
+                p.stock <= 0 ? "border-gray-200 opacity-60" : "border-mango-200",
+              ]}>
+                <div class="flex-1">
+                  <p class="text-sm font-medium">
+                    {p.name} · {p.variant}
+                  </p>
+                  <p class="text-xs text-gray-600">
+                    ${p.price} / 包 · 剩 {p.stock} 包{p.stock <= 0 && " · 已售完"}
+                  </p>
+                </div>
+                <input
+                  type="number"
+                  name={`qty_${p.sku}`}
+                  data-sku={p.sku}
+                  min="0"
+                  max={Math.min(99, Math.max(p.stock, 0))}
+                  value="0"
+                  disabled={p.stock <= 0}
+                  class="item-qty w-20 rounded border border-gray-300 px-2 py-1 text-center outline-none focus:border-mango-500 disabled:bg-gray-100"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-sm font-medium" for="notes">
+            備註（選填）
+          </label>
+          <textarea
+            id="notes"
+            name="notes"
+            rows="2"
+            maxlength="200"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-mango-500 focus:ring-1 focus:ring-mango-500"
+          ></textarea>
+        </div>
+
+        <div id="form-error" class="hidden rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700"></div>
+
+        <button
+          type="submit"
+          id="submit-btn"
+          class="w-full rounded-lg bg-mango-500 px-6 py-3 font-semibold text-white transition hover:bg-mango-600 disabled:cursor-not-allowed disabled:bg-mango-300"
+        >
+          發起併單
+        </button>
+      </form>
+    )}
+  </main>
+</Layout>
+
+<script>
+  const form = document.getElementById("group-form") as HTMLFormElement | null;
+  if (form) {
+    const btn = document.getElementById("submit-btn") as HTMLButtonElement;
+    const errEl = document.getElementById("form-error") as HTMLElement;
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errEl.textContent = "";
+      errEl.classList.add("hidden");
+      if (!form.reportValidity()) return;
+
+      const items = Array.from(document.querySelectorAll<HTMLInputElement>(".item-qty"))
+        .map((el) => ({ sku: el.dataset.sku!, qty: Number(el.value) || 0 }))
+        .filter((i) => i.qty > 0);
+      if (items.length === 0) {
+        errEl.textContent = "請至少選購一項。";
+        errEl.classList.remove("hidden");
+        return;
+      }
+
+      const idempotencyKey = (form.elements.namedItem("idempotency_key") as HTMLInputElement).value;
+      const dateStr = (document.getElementById("deadline") as HTMLInputElement).value; // "YYYY-MM-DD" (Taipei)
+      // End-of-day Taipei → UTC ISO. Taipei is UTC+8, so 23:59:59.999+08:00.
+      const deadline = new Date(`${dateStr}T23:59:59.999+08:00`).toISOString();
+      const body = {
+        idempotency_key: idempotencyKey,
+        host_name: (document.getElementById("host_name") as HTMLInputElement).value.trim(),
+        host_phone: (document.getElementById("host_phone") as HTMLInputElement).value.trim(),
+        host_address: (document.getElementById("host_address") as HTMLTextAreaElement).value.trim(),
+        deadline,
+        items,
+        notes: (document.getElementById("notes") as HTMLTextAreaElement).value.trim() || undefined,
+      };
+
+      btn.disabled = true;
+      btn.textContent = "建立中...";
+
+      try {
+        const res = await fetch("/api/admin/groups/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json()) as
+          | { ok: true; group_id: number; code: string; host_order_id: string }
+          | { ok: false; error_code: string; reason?: string };
+        if (res.ok && data.ok) {
+          location.href = `/admin/groups/${data.group_id}`;
+        } else {
+          const err = data as { error_code?: string; reason?: string };
+          errEl.textContent = err.reason
+            ? `${err.error_code}: ${err.reason}`
+            : (err.error_code ?? "建立失敗");
+          errEl.classList.remove("hidden");
+          btn.disabled = false;
+          btn.textContent = "發起併單";
+        }
+      } catch (err) {
+        errEl.textContent = "網路錯誤，請稍後再試。";
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+        btn.textContent = "發起併單";
+      }
+    });
+  }
+</script>
