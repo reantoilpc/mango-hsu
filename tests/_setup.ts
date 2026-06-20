@@ -285,6 +285,10 @@ export function cleanupTestData() {
   d1Execute(
     `DELETE FROM orders WHERE name LIKE '${TEST_NAME_PREFIX}%' OR idempotency_key LIKE '${TEST_NAME_PREFIX}%'`,
   );
+  // V7 併單: remove test groups (orders already deleted above; this clears the group rows).
+  d1Execute(
+    `DELETE FROM order_groups WHERE created_by LIKE '%@local' OR season_id IN (SELECT id FROM seasons WHERE code LIKE '${TEST_SEASON_PREFIX}%')`,
+  );
   // Audit log: clean up test-induced rows (intake, group_stock_change for test groups).
   // Use season_id as the discriminator.
   d1Execute(
