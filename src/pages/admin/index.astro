@@ -5,6 +5,7 @@ import { orders, seasons, product_groups } from "../../db/schema";
 import { sql, desc, eq, asc } from "drizzle-orm";
 import { activeOrdersFilter } from "../../lib/orders-query";
 import { groupStockSummary } from "../../lib/admin-dashboard";
+import { querySalesSummary, shapeSalesSummary, formatTwd, type SalesSummary } from "../../lib/sales-summary";
 import { env } from "../../lib/env";
 
 
@@ -60,6 +61,14 @@ const groupRows = activeSeason
   : [];
 
 const stockSummary = groupStockSummary(groupRows);
+
+// Sales summary is admin-only (operators must not see revenue). Skip the
+// queries entirely for operators and when no season is active.
+let sales: SalesSummary | null = null;
+if (activeSeason && session.role === "admin") {
+  const raw = await querySalesSummary(db, activeSeason.id);
+  sales = shapeSalesSummary(raw.perFlavour, raw.totals);
+}
 ---
 
 <Layout>
@@ -139,6 +148,55 @@ const stockSummary = groupStockSummary(groupRows);
             {session.role === "admin" && (
               <a href="/admin/products" class="ml-1 text-mango-700 underline">先到「商品」建立 SKU →</a>
             )}
+          </p>
+        )}
+      </section>
+    )}
+
+    {/* Sales summary — admin only, active-season cumulative */}
+    {sales && (
+      <section class="mb-8" aria-label="銷售概況">
+        <h2 class="mb-2 text-lg font-bold">
+          銷售概況
+          <span class="ml-2 text-sm font-normal text-gray-500">{activeSeason.name} · 當季累計</span>
+        </h2>
+        {sales.hasSales ? (
+          <div class="rounded border border-gray-200">
+            <ul class="divide-y divide-gray-100">
+              {sales.flavours.map((f) => (
+                <li class="flex items-baseline justify-between px-4 py-3">
+                  <span class="font-medium">{f.name}</span>
+                  <span class="flex items-baseline gap-4 text-right text-sm">
+                    <span class="w-20 text-base font-bold text-mango-700">{f.jin} 斤</span>
+                    <span class="w-12 text-gray-500">{f.qty} 件</span>
+                    <span class="w-20 font-medium">{formatTwd(f.amount)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div class="space-y-1 border-t border-gray-200 px-4 py-3 text-sm">
+              <div class="flex justify-between">
+                <span>合計</span>
+                <span>{sales.totals.jin} 斤 · {sales.totals.qty} 件 · {formatTwd(sales.totals.subtotal)}</span>
+              </div>
+              <div class="flex justify-between text-gray-500">
+                <span>運費</span>
+                <span>+ {formatTwd(sales.totals.shipping)}</span>
+              </div>
+              <div class="flex justify-between font-bold">
+                <span>訂單總額（{sales.ordersN} 筆）</span>
+                <span>{formatTwd(sales.totals.total)}</span>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+              <span class="text-emerald-700">已收 <strong>{formatTwd(sales.collection.paid)}</strong></span>
+              <span class="text-amber-700">未收 <strong>{formatTwd(sales.collection.unpaid)}</strong></span>
+              <span class="text-gray-600">收款進度 {sales.collection.paidPct}%</span>
+            </div>
+          </div>
+        ) : (
+          <p class="rounded border border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+            當季尚無銷售。
           </p>
         )}
       </section>
