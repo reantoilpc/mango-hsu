@@ -1,0 +1,312 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import AdminBreadcrumb from "../../../components/admin/AdminBreadcrumb.astro";
+import { makeDb } from "../../../db/client";
+import { orders, order_items, order_groups, products, seasons } from "../../../db/schema";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { formatTaipei } from "../../../lib/formatters";
+import { parseShippingConfig } from "../../../lib/shipping";
+import { computeGroupShipping } from "../../../lib/order-groups";
+import { env } from "../../../lib/env";
+
+const session = Astro.locals.session;
+if (!session) return Astro.redirect("/admin/login");
+if (session.role !== "admin") {
+  return new Response("admin only", { status: 403 });
+}
+
+const groupId = Number(Astro.params.id);
+if (!Number.isInteger(groupId)) {
+  return new Response("Invalid group id", { status: 400 });
+}
+
+const db = makeDb(env);
+const groupRows = await db
+  .select()
+  .from(order_groups)
+  .where(eq(order_groups.id, groupId))
+  .limit(1);
+if (groupRows.length === 0) {
+  return new Response("Group not found", { status: 404 });
+}
+const group = groupRows[0]!;
+
+// All non-cancelled orders in this group. Host first, then by created_at.
+const groupOrders = await db
+  .select()
+  .from(orders)
+  .where(and(eq(orders.order_group_id, groupId), isNull(orders.cancelled_at)))
+  .orderBy(asc(orders.created_at));
+// Host first regardless of created_at ordering.
+groupOrders.sort((a, b) => {
+  const ha = a.group_role === "host" ? 0 : 1;
+  const hb = b.group_role === "host" ? 0 : 1;
+  return ha - hb;
+});
+
+const orderIds = groupOrders.map((o) => o.order_id);
+const itemRows = orderIds.length
+  ? await db
+      .select({
+        order_id: order_items.order_id,
+        sku: order_items.sku,
+        qty: order_items.qty,
+        unit_price: order_items.unit_price,
+        name: products.name,
+        variant: products.variant,
+        package_fen: products.package_fen,
+      })
+      .from(order_items)
+      .innerJoin(products, eq(order_items.product_id, products.id))
+      .where(inArray(order_items.order_id, orderIds))
+  : [];
+
+const itemsByOrder = new Map<string, typeof itemRows>();
+for (const it of itemRows) {
+  const arr = itemsByOrder.get(it.order_id) ?? [];
+  arr.push(it);
+  itemsByOrder.set(it.order_id, arr);
+}
+
+// Per-person picking blocks (誰的貨). Host block is flagged.
+const perPerson = groupOrders.map((o) => ({
+  order: o,
+  items: itemsByOrder.get(o.order_id) ?? [],
+}));
+
+// Season shipping config → combined-weight host fee (for display).
+const seasonCfgRows = await db
+  .select({ shipping_config: seasons.shipping_config })
+  .from(seasons)
+  .where(eq(seasons.id, group.season_id))
+  .limit(1);
+const shipConfig = parseShippingConfig(seasonCfgRows[0]?.shipping_config ?? null);
+
+const weights = perPerson.map((p) => ({
+  items: p.items.map((it) => ({ package_fen: it.package_fen, qty: it.qty })),
+}));
+let combinedFen = 0;
+for (const w of weights) {
+  for (const it of w.items) combinedFen += it.package_fen * it.qty;
+}
+const combinedJin = combinedFen / 100;
+const combinedJinText = Number.isInteger(combinedJin) ? `${combinedJin}` : combinedJin.toFixed(2);
+// What the host fee would be on the combined weight. Once closed, the host
+// order's stored shipping is authoritative; before close this is a preview.
+const previewHostShipping = computeGroupShipping(weights, shipConfig);
+const host = perPerson.find((p) => p.order.group_role === "host");
+const hostShipping = group.status === "open" ? previewHostShipping : (host?.order.shipping ?? previewHostShipping);
+// Grand total to collect = Σ subtotals + the single host shipping fee.
+let combinedSubtotal = 0;
+for (const p of perPerson) combinedSubtotal += p.order.subtotal;
+const grandTotal = combinedSubtotal + hostShipping;
+
+const statusMeta: Record<string, { label: string; cls: string }> = {
+  open: { label: "開團中", cls: "bg-emerald-100 text-emerald-700" },
+  closed: { label: "已關團", cls: "bg-amber-100 text-amber-700" },
+  shipped: { label: "已出貨", cls: "bg-blue-100 text-blue-700" },
+  cancelled: { label: "已取消", cls: "bg-gray-100 text-gray-500" },
+};
+const meta = statusMeta[group.status] ?? { label: group.status, cls: "bg-gray-100 text-gray-700" };
+---
+
+<Layout>
+  <main class="mx-auto max-w-3xl px-4 py-6 pb-24">
+    <AdminBreadcrumb
+      items={[
+        { label: "後台首頁", href: "/admin" },
+        { label: "併單", href: "/admin/groups" },
+        { label: group.code },
+      ]}
+    />
+
+    <header class="mb-6">
+      <div class="flex flex-wrap items-center gap-3">
+        <h1 class="font-mono text-2xl font-bold">{group.code}</h1>
+        <span class:list={["rounded px-2 py-0.5 text-xs", meta.cls]}>{meta.label}</span>
+      </div>
+    </header>
+
+    <section class="mb-6 rounded border border-gray-200 p-4">
+      <h2 class="mb-3 text-lg font-bold">團主資訊</h2>
+      <dl class="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
+        <dt class="text-gray-500">團主</dt>
+        <dd>{group.host_name}</dd>
+        <dt class="text-gray-500">收件地址</dt>
+        <dd>{group.host_address}</dd>
+        <dt class="text-gray-500">截止</dt>
+        <dd>{formatTaipei(group.deadline)}</dd>
+        {group.tracking_no && (
+          <>
+            <dt class="text-gray-500">物流單號</dt>
+            <dd class="font-mono">{group.tracking_no}</dd>
+          </>
+        )}
+      </dl>
+    </section>
+
+    <section class="mb-6">
+      <h2 class="mb-3 text-lg font-bold">各人訂購（揀貨清單）</h2>
+      <ul class="space-y-3">
+        {perPerson.map(({ order, items }) => (
+          <li class="rounded border border-gray-200 p-4">
+            <div class="mb-2 flex flex-wrap items-center gap-2">
+              <a href={`/admin/orders/${order.order_id}`} class="font-mono text-sm underline">
+                {order.order_id}
+              </a>
+              <span class="font-medium text-gray-800">{order.name}</span>
+              {order.group_role === "host" && (
+                <span class="rounded-full bg-mango-100 px-2 py-0.5 text-xs font-medium text-mango-700">
+                  團主
+                </span>
+              )}
+              <span
+                class:list={[
+                  "rounded px-2 py-0.5 text-xs",
+                  order.paid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+                ]}
+              >
+                {order.paid ? "已付款" : "待付款"}
+              </span>
+              <span
+                class:list={[
+                  "rounded px-2 py-0.5 text-xs",
+                  order.shipped ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-700",
+                ]}
+              >
+                {order.shipped ? "已出貨" : "待出貨"}
+              </span>
+            </div>
+            <ul class="text-sm text-gray-700">
+              {items.map((it) => (
+                <li>{it.name}{it.variant} ×{it.qty}</li>
+              ))}
+              {items.length === 0 && <li class="text-gray-400">（無品項）</li>}
+            </ul>
+            <p class="mt-2 text-sm text-gray-600">小計 ${order.subtotal}</p>
+          </li>
+        ))}
+        {perPerson.length === 0 && (
+          <li class="rounded border border-gray-200 px-4 py-6 text-center text-sm text-gray-500">
+            （此團尚無有效訂單）
+          </li>
+        )}
+      </ul>
+    </section>
+
+    <section class="mb-6 rounded border border-gray-200 p-4">
+      <h2 class="mb-3 text-lg font-bold">整團結算</h2>
+      <dl class="grid grid-cols-[8rem_1fr] gap-y-2 text-sm">
+        <dt class="text-gray-500">合計重量</dt>
+        <dd>{combinedJinText} 斤</dd>
+        <dt class="text-gray-500">團主運費{group.status === "open" && "（預估）"}</dt>
+        <dd>${hostShipping}</dd>
+        <dt class="font-medium">應收總額</dt>
+        <dd class="font-medium">${grandTotal}</dd>
+      </dl>
+    </section>
+
+    <section class="mb-6 rounded border border-gray-200 p-4">
+      <h2 class="mb-3 text-lg font-bold">操作</h2>
+      <div class="space-y-3">
+        {group.status === "open" && (
+          <button
+            type="button"
+            id="close-btn"
+            class="w-full rounded bg-amber-600 px-4 py-3 min-h-[44px] text-base font-medium text-white hover:bg-amber-700"
+          >
+            關團結算
+          </button>
+        )}
+        {group.status === "closed" && (
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              id="tracking"
+              placeholder="物流單號"
+              maxlength="100"
+              class="flex-1 rounded border border-gray-300 px-3 py-3 min-h-[44px] text-base focus-visible:outline-2 focus-visible:outline-mango-500 focus-visible:outline-offset-2"
+              aria-label="物流單號"
+            />
+            <button
+              type="button"
+              id="ship-btn"
+              class="rounded bg-blue-600 px-4 py-3 min-h-[44px] text-base font-medium text-white hover:bg-blue-700"
+            >
+              整團出貨
+            </button>
+          </div>
+        )}
+        {(group.status === "open" || group.status === "closed") && (
+          <button
+            type="button"
+            id="cancel-btn"
+            class="w-full rounded border border-red-400 px-4 py-3 min-h-[44px] text-base text-red-700 hover:bg-red-50"
+          >
+            取消整團
+          </button>
+        )}
+        {(group.status === "shipped" || group.status === "cancelled") && (
+          <p class="text-sm text-gray-500">
+            此團已{group.status === "shipped" ? "出貨" : "取消"}，無可用操作。
+          </p>
+        )}
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const stateNode = document.getElementById("group-state");
+    const GROUP_ID: number = stateNode
+      ? (JSON.parse(stateNode.textContent || "{}").group_id ?? 0)
+      : 0;
+
+    async function act(path: string, body?: unknown): Promise<void> {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error_code?: string;
+      };
+      if (res.ok && data.ok) {
+        location.reload();
+      } else {
+        alert(
+          data.error_code === "BAD_STATE"
+            ? "狀態已變更，請重新整理"
+            : (data.error_code ?? "操作失敗"),
+        );
+      }
+    }
+
+    document.getElementById("close-btn")?.addEventListener("click", () => {
+      if (confirm("關團後不能再加入，確定結算運費？")) {
+        act(`/api/admin/groups/${GROUP_ID}/close`);
+      }
+    });
+    document.getElementById("ship-btn")?.addEventListener("click", () => {
+      const t = (document.getElementById("tracking") as HTMLInputElement).value.trim();
+      if (!t) {
+        alert("請填物流單號");
+        return;
+      }
+      act(`/api/admin/groups/${GROUP_ID}/ship`, { tracking_no: t });
+    });
+    document.getElementById("cancel-btn")?.addEventListener("click", () => {
+      if (confirm("取消整團會還原所有人的庫存，確定？")) {
+        act(`/api/admin/groups/${GROUP_ID}/cancel`);
+      }
+    });
+  </script>
+
+  <script
+    is:inline
+    type="application/json"
+    id="group-state"
+    set:html={JSON.stringify({ group_id: group.id })}
+  />
+</Layout>

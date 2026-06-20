@@ -8,6 +8,7 @@ describe("admin-nav model", () => {
     expect(keys).toEqual([
       "home",
       "orders",
+      "order-groups",
       "seasons",
       "groups",
       "products",
@@ -34,6 +35,7 @@ describe("admin-nav model", () => {
     expect(adminKeys).toEqual([
       "home",
       "orders",
+      "order-groups",
       "seasons",
       "groups",
       "products",
@@ -41,6 +43,13 @@ describe("admin-nav model", () => {
       "settings",
       "account",
     ]);
+  });
+
+  it("includes a 併單 entry pointing at /admin/groups", () => {
+    const g = ADMIN_NAV_ITEMS.find((i) => i.key === "order-groups");
+    expect(g?.href).toBe("/admin/groups");
+    expect(g?.label).toBe("併單");
+    expect(g?.operatorVisible).toBe(false);
   });
 
   it("activeNavKey matches the longest href prefix of the current path", () => {

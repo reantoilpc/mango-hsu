@@ -110,6 +110,22 @@ for (const p of settings.products) groupStockFenById[p.group_id] = p.group_stock
               ></textarea>
             </div>
 
+            <div class="space-y-1">
+              <label for="group-code" class="block text-sm font-medium"
+                >併單代碼（選填，5 位數字）</label
+              >
+              <input
+                id="group-code"
+                name="group_code"
+                inputmode="numeric"
+                maxlength="5"
+                autocomplete="off"
+                placeholder="例如 48217"
+                class="w-full border border-mango-300 rounded-lg px-3 py-2 bg-white focus:border-mango-500 focus:ring-1 focus:ring-mango-500 outline-none"
+              />
+              <p id="group-status" class="hidden text-sm"></p>
+            </div>
+
             <div>
               <p class="block mb-2 text-sm font-medium">
                 訂購品項 <span class="text-red-500">*</span>
@@ -378,6 +394,58 @@ for (const p of settings.products) groupStockFenById[p.group_id] = p.group_stock
     const submitBtn = document.getElementById("submit-btn") as HTMLButtonElement;
     const pdpa = document.getElementById("pdpa") as HTMLInputElement;
 
+    // V7 併單: optional 5-digit group code. On a valid open group, members ship $0
+    // to the host's address — so we hide the address field and tag the order.
+    const groupCodeEl = document.getElementById("group-code") as HTMLInputElement;
+    const groupStatusEl = document.getElementById("group-status") as HTMLElement;
+    const addressEl = document.getElementById("address") as HTMLTextAreaElement;
+    const addressWrap = addressEl.closest("div") as HTMLElement;
+    let groupOk = false;
+
+    async function refreshGroup() {
+      const code = groupCodeEl.value.trim();
+      groupOk = false;
+      if (!/^[1-9]\d{4}$/.test(code)) {
+        groupStatusEl.classList.add("hidden");
+        addressWrap.classList.remove("hidden");
+        addressEl.required = true;
+        return;
+      }
+      try {
+        const res = await fetch(`/api/groups/${code}`);
+        const data = (await res.json()) as {
+          ok: boolean;
+          host_name?: string;
+          deadline?: string;
+        };
+        if (data.ok) {
+          groupOk = true;
+          const dl = new Date(data.deadline as string);
+          const d = `${dl.getMonth() + 1}/${dl.getDate()}`;
+          groupStatusEl.textContent = `✓ 併單：${data.host_name}（截止 ${d}）· 運費 $0，寄送至團主`;
+          groupStatusEl.className = "text-sm text-emerald-700";
+          addressWrap.classList.add("hidden"); // ships to host; address not needed
+          addressEl.required = false; // hidden + grouped: server sets host address
+        } else {
+          groupStatusEl.textContent = "併單代碼無效或已截止";
+          groupStatusEl.className = "text-sm text-red-600";
+          addressWrap.classList.remove("hidden");
+          addressEl.required = true;
+        }
+      } catch {
+        groupStatusEl.className = "text-sm text-red-600";
+        groupStatusEl.textContent = "查詢失敗，請重試";
+      }
+    }
+    groupCodeEl.addEventListener("input", () => {
+      // debounce
+      clearTimeout((window as unknown as { _gt?: number })._gt);
+      (window as unknown as { _gt?: number })._gt = window.setTimeout(
+        refreshGroup,
+        350,
+      );
+    });
+
     function computeItems(): {
       items: OrderItem[];
       totalQty: number;
@@ -469,6 +537,12 @@ for (const p of settings.products) groupStockFenById[p.group_id] = p.group_stock
       const notes = (form.elements.namedItem("notes") as HTMLTextAreaElement).value.trim();
       const honeypot = (form.elements.namedItem("website") as HTMLInputElement).value;
 
+      // V7 併單: when a valid group code is entered, the order ships to the host's
+      // address ($0). Send a placeholder address (server overrides it with the host
+      // address) and pass the code so /api/orders tags this as a member order.
+      const code = groupCodeEl.value.trim();
+      const grouped = groupOk && /^[1-9]\d{4}$/.test(code);
+
       submitBtn.disabled = true;
       submitBtn.textContent = "處理中（最多 15 秒）...";
 
@@ -477,10 +551,11 @@ for (const p of settings.products) groupStockFenById[p.group_id] = p.group_stock
         honeypot,
         name,
         phone,
-        address,
+        address: grouped ? "（併單寄送至團主）" : address,
         items,
         notes,
         pdpa_accepted: true,
+        group_code: grouped ? code : undefined,
       });
 
       if (!res.ok) {

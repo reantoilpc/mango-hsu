@@ -27,6 +27,7 @@ export interface AdminNavItem {
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { key: "home", label: "首頁", href: "/admin", operatorVisible: true },
   { key: "orders", label: "訂單", href: "/admin/orders", operatorVisible: true },
+  { key: "order-groups", label: "併單", href: "/admin/groups", operatorVisible: false },
   { key: "seasons", label: "年度設定", href: "/admin/seasons", operatorVisible: false },
   { key: "groups", label: "品種庫存", href: "/admin/product-groups", operatorVisible: false },
   { key: "products", label: "商品", href: "/admin/products", operatorVisible: false },

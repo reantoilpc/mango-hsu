@@ -27,7 +27,10 @@ export type OrderErrorCode =
   // V5.2: customer cart points at a SKU not in the active season (could be archived,
   // could be a typo). Same response from the HTTP perspective whether the SKU once
   // existed or never did — don't leak season state.
-  | "unknown_product";
+  | "unknown_product"
+  // V7 併單: supplied group_code is malformed, or no open group matches it (closed,
+  // cancelled, past deadline, or never existed).
+  | "GROUP_INVALID";
 
 export interface OrderError {
   ok: false;

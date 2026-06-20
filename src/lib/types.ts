@@ -53,6 +53,9 @@ export interface OrderRequest {
   items: OrderItem[];
   notes: string;
   pdpa_accepted: boolean;
+  // V7 併單: optional 5-digit group code. When set + valid, /api/orders forces
+  // shipping=0, address=host_address, and tags the order as a group member.
+  group_code?: string;
 }
 
 export interface OrderSuccess {
@@ -76,7 +79,9 @@ export type OrderErrorCode =
   | "SEASON_CLOSED"
   | "INVALID_INPUT"
   | "INTERNAL"
-  | "unknown_product";
+  | "unknown_product"
+  // V7 併單: malformed group_code or no matching open group.
+  | "GROUP_INVALID";
 
 export interface OrderError {
   ok: false;
