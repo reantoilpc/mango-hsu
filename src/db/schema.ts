@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 // Time convention:
 // - All timestamp columns store UTC ISO-8601 with 'Z' suffix (e.g. "2026-04-26T14:38:27.123Z").
@@ -130,6 +131,10 @@ export const orders = sqliteTable(
     // PDPA cron purge ignores this flag (uses created_at only).
     // Who cancelled is recorded via audit_log (action='order_cancelled').
     cancelled_at: text("cancelled_at"),
+    // V7 併單: links a member/host order to its group. NULL = standalone order.
+    // Named order_group_id (not group_id) to avoid clashing with products.group_id.
+    order_group_id: integer("order_group_id").references((): any => order_groups.id),
+    group_role: text("group_role", { enum: ["host", "member"] }),
   },
   (t) => ({
     byCreated: index("orders_by_created").on(t.created_at),
@@ -159,6 +164,36 @@ export const order_items = sqliteTable(
   (t) => ({
     byOrder: index("order_items_by_order").on(t.order_id),
     byProduct: index("order_items_by_product").on(t.product_id),
+  }),
+);
+
+// V7 併單 / combined shipping. A group binds several orders (one host + members)
+// for one shipment. code is unique only among status='open' groups (partial index).
+export const order_groups = sqliteTable(
+  "order_groups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    season_id: integer("season_id")
+      .notNull()
+      .references(() => seasons.id),
+    code: text("code").notNull(), // 5-digit string, 10000–99999
+    host_name: text("host_name").notNull(),
+    host_address: text("host_address").notNull(),
+    deadline: text("deadline").notNull(), // UTC ISO + Z
+    status: text("status", { enum: ["open", "closed", "shipped", "cancelled"] })
+      .notNull()
+      .default("open"),
+    created_by: text("created_by").notNull(), // admin email; NOT a FK (mirrors audit_log)
+    created_at: text("created_at").notNull(),
+    tracking_no: text("tracking_no"),
+    shipped_at: text("shipped_at"),
+    shipped_by: text("shipped_by"),
+  },
+  (t) => ({
+    uqOpenCode: uniqueIndex("order_groups_open_code_unique")
+      .on(t.code)
+      .where(sql`${t.status} = 'open'`),
+    byStatus: index("order_groups_by_status").on(t.status),
   }),
 );
 
@@ -216,3 +251,4 @@ export type OrderItem = typeof order_items.$inferSelect;
 export type AdminUser = typeof admin_users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type AuditLog = typeof audit_log.$inferSelect;
+export type OrderGroup = typeof order_groups.$inferSelect;
