@@ -9,6 +9,7 @@ describe("admin-nav model", () => {
       "home",
       "orders",
       "order-groups",
+      "line-bindings",
       "seasons",
       "groups",
       "products",
@@ -36,6 +37,7 @@ describe("admin-nav model", () => {
       "home",
       "orders",
       "order-groups",
+      "line-bindings",
       "seasons",
       "groups",
       "products",
@@ -50,6 +52,19 @@ describe("admin-nav model", () => {
     expect(g?.href).toBe("/admin/groups");
     expect(g?.label).toBe("併單");
     expect(g?.operatorVisible).toBe(false);
+  });
+
+  it("includes a LINE 綁定 entry (admin-only) pointing at /admin/line-bindings", () => {
+    const lb = ADMIN_NAV_ITEMS.find((i) => i.key === "line-bindings");
+    expect(lb?.href).toBe("/admin/line-bindings");
+    expect(lb?.label).toBe("LINE 綁定");
+    expect(lb?.operatorVisible).toBe(false);
+    // hidden from operators
+    expect(navItemsForRole("operator").map((i) => i.key)).not.toContain("line-bindings");
+  });
+
+  it("maps /admin/line-bindings to the line-bindings key", () => {
+    expect(activeNavKey("/admin/line-bindings")).toBe("line-bindings");
   });
 
   it("activeNavKey matches the longest href prefix of the current path", () => {
